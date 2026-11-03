@@ -305,7 +305,7 @@ function save() {
     catch (e) { toast("Impossible d'enregistrer : exportez une sauvegarde depuis l'onglet Données."); }
     return;
   }
-  if (!fs || !me) return;
+  if (!fs || !me || !ferme) return;
   // n'envoie que les fiches modifiées ou supprimées depuis la dernière synchro
   const ops = [];
   for (const col of COLS) {
@@ -313,9 +313,9 @@ function save() {
     for (const d of db[col]) {
       seen.add(d.id);
       const s = JSON.stringify(d);
-      if (synced[col].get(d.id) !== s) { synced[col].set(d.id, s); ops.push(b => b.set(fs.collection(col).doc(d.id), toFs(col, d))); }
+      if (synced[col].get(d.id) !== s) { synced[col].set(d.id, s); ops.push(b => b.set(farmCol(col).doc(d.id), toFs(col, d))); }
     }
-    for (const id of [...synced[col].keys()]) if (!seen.has(id)) { synced[col].delete(id); ops.push(b => b.delete(fs.collection(col).doc(id))); }
+    for (const id of [...synced[col].keys()]) if (!seen.has(id)) { synced[col].delete(id); ops.push(b => b.delete(farmCol(col).doc(id))); }
   }
   for (let i = 0; i < ops.length; i += 400) {
     const b = fs.batch(); ops.slice(i, i + 400).forEach(op => op(b));
@@ -357,15 +357,34 @@ function startCloud() {
   fs = firebase.firestore();
   fs.enablePersistence({ synchronizeTabs: true }).catch(() => {}); // fonctionne hors réseau, synchronise au retour
   const lg = document.getElementById('login');
-  firebase.auth().onAuthStateChanged(user => {
+  firebase.auth().onAuthStateChanged(async user => {
     unsubs.forEach(u => u()); unsubs = [];
-    me = user;
-    if (!user) { lg.hidden = false; db = { parcels: [], interventions: [] }; return; }
+    me = user; ferme = null;
+    db = { parcels: [], interventions: [] };
+    COLS.forEach(c => synced[c] = new Map());
+    if (!user) { lg.hidden = false; return; }
     lg.hidden = true;
     setSync('wait', 'Connexion…');
+    // chaque compte est rattaché à une ferme : membres/{email} → { ferme: "..." }
+    const email = (user.email || '').toLowerCase();
+    const cacheKey = STORE + '-ferme-' + email;
+    try {
+      const m = await fs.collection('membres').doc(email).get();
+      ferme = m.exists ? (m.data().ferme || null) : null;
+      if (ferme) { try { localStorage.setItem(cacheKey, ferme); } catch (e) {} }
+    } catch (e) {
+      try { ferme = localStorage.getItem(cacheKey); } catch (x) {} // hors réseau : dernière ferme connue
+    }
+    if (!ferme) {
+      await firebase.auth().signOut();
+      const err = document.getElementById('lg-err');
+      err.hidden = false;
+      err.textContent = `Le compte ${email} n'est rattaché à aucune ferme. Demandez à la personne qui gère l'application de l'ajouter dans « membres ».`;
+      return;
+    }
     for (const col of COLS) {
       cloudReady[col] = false;
-      unsubs.push(fs.collection(col).onSnapshot({ includeMetadataChanges: true }, snap => {
+      unsubs.push(farmCol(col).onSnapshot({ includeMetadataChanges: true }, snap => {
         latest[col] = snap.docs.map(d => fromFs(col, d.data()));
         const first = !cloudReady[col]; cloudReady[col] = true;
         applyLatest();
@@ -374,7 +393,10 @@ function startCloud() {
         if (snap.metadata.hasPendingWrites) setSync('wait', 'Envoi…');
         else if (snap.metadata.fromCache) setSync('wait', 'Hors ligne');
         else setSync('ok', 'Synchronisé');
-      }, err => { console.warn(err); setSync('off', 'Accès refusé'); toast("La base commune refuse l'accès : vérifiez les règles Firestore (voir le guide)."); }));
+      }, err => {
+        console.warn(err); setSync('off', 'Accès refusé');
+        toast(`Accès refusé à la ferme « ${ferme} » pour ${email} (${err.code}). Vérifiez les règles Firestore et la liste membres.`);
+      }));
     }
   });
   document.getElementById('login-form').addEventListener('submit', async e => {
@@ -398,6 +420,8 @@ function startCloud() {
   };
 }
 const whoAmI = () => me && me.email ? me.email.split('@')[0] : '';
+let ferme = null;
+const farmCol = col => fs.collection('fermes').doc(ferme).collection(col);
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
 const today = () => new Date().toISOString().slice(0, 10);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -1050,7 +1074,7 @@ function renderData() {
       <strong>Où sont mes données ?</strong>
       ${CLOUD
         ? `<span>Dans la base commune : tout ce que vous saisissez apparaît sur les appareils des autres personnes connectées. Sans réseau, la saisie continue et part dès le retour de la connexion.</span>
-           <span>Connecté en tant que <b>${esc(me && me.email)}</b>. <button class="linkbtn" type="button" id="x-logout">Se déconnecter</button></span>`
+           <span>Connecté en tant que <b>${esc(me && me.email)}</b>, ferme <b>${esc(ferme)}</b>. <button class="linkbtn" type="button" id="x-logout">Se déconnecter</button></span>`
         : `<span>Tout est enregistré dans ce navigateur, sur cet appareil. Faites une sauvegarde régulièrement, et pour passer sur un autre appareil exportez puis importez le fichier.</span>`}
       <span>Une sauvegarde de temps en temps reste une bonne précaution.</span>
       <div class="row"><button class="btn primary" id="x-save" type="button">Télécharger une sauvegarde</button>
@@ -1065,7 +1089,8 @@ function renderData() {
     ${arch.length ? `<div><h3 style="font-size:18px">Parcelles découpées (archives)</h3>
       <div class="plist">${arch.map(p => `<div class="pitem" style="cursor:default"><span class="sw" style="background:${cultureColor(p.culture)}"></span>
         <span><span class="nm" style="display:block">${esc(p.name)}</span><span class="sub">découpée le ${fmtDate(p.splitDate)}</span></span><span class="ha">${fmtHa(p.area)} ha</span></div>`).join('')}</div></div>` : ''}
-    <div class="row" style="margin-top:auto"><button class="btn small danger" id="x-wipe" type="button">Tout effacer</button></div>`;
+    <div class="row" style="margin-top:auto"><button class="btn small danger" id="x-wipe" type="button">Tout effacer</button>
+      <span class="note" style="margin-left:auto">Version 2 · fermes</span></div>`;
   $('#x-save').onclick = () => download(`mon-parcellaire-sauvegarde-${today()}.json`, JSON.stringify(db), 'application/json');
   $('#x-geo').onclick = () => download(`parcelles-${today()}.geojson`, JSON.stringify(turf.featureCollection(active().map(p =>
     turf.feature(p.geometry, { nom: p.name, culture: p.culture, ilot: p.ilot, surface_ha: +p.area.toFixed(4) })))), 'application/geo+json');
