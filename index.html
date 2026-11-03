@@ -220,6 +220,7 @@ td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
       </svg>
       <div><h1>Mon Parcellaire</h1><small>Carnet de plaine</small></div>
       <span class="sync" id="sync" hidden><i></i><span></span></span>
+      <button class="btn small" id="btn-logout" type="button" hidden title="Se déconnecter">Déconnexion</button>
     </div>
     <nav class="tabs" role="tablist">
       <button role="tab" data-tab="parcels" aria-selected="true">Parcelles</button>
@@ -362,6 +363,7 @@ function startCloud() {
     me = user; ferme = null;
     db = { parcels: [], interventions: [] };
     COLS.forEach(c => synced[c] = new Map());
+    document.getElementById('btn-logout').hidden = !user;
     if (!user) { lg.hidden = false; return; }
     lg.hidden = true;
     setSync('wait', 'Connexion…');
@@ -1113,7 +1115,7 @@ function renderData() {
     } catch (err) { toast('Ce fichier n\'est pas une sauvegarde Mon Parcellaire.'); }
   };
   $('#x-import').onchange = async e => { const f = e.target.files[0]; if (f) await importFile(f); e.target.value = ''; };
-  const lo = $('#x-logout'); if (lo) lo.onclick = () => firebase.auth().signOut();
+  const lo = $('#x-logout'); if (lo) lo.onclick = askLogout;
   $('#x-wipe').onclick = () => confirmBox('Tout effacer', CLOUD
     ? 'Toutes les parcelles et interventions de la base commune seront supprimées, pour tout le monde. Téléchargez une sauvegarde avant si besoin.'
     : 'Toutes les parcelles et interventions de ce navigateur seront supprimées. Téléchargez une sauvegarde avant si besoin.', 'Tout effacer', () => {
@@ -1183,6 +1185,16 @@ function loadDemo() {
   );
   save(); renderMap(); renderParcels(); fitAll(); toast('Exemple chargé');
 }
+
+/* ============ Déconnexion ============ */
+function askLogout() {
+  confirmBox('Se déconnecter', `Vous serez déconnecté de ${esc(me && me.email)} sur cet appareil. Vos données restent dans la base commune. Il faudra retaper l'e-mail et le mot de passe pour revenir.`, 'Se déconnecter', () => {
+    if (mode === 'split') cancelSplit();
+    selected = null; showView('parcels');
+    firebase.auth().signOut();
+  }, false);
+}
+$('#btn-logout').onclick = askLogout;
 
 /* ============ Position GPS ============ */
 let gpsMarker = null, gpsCircle = null, gpsFirst = true;
