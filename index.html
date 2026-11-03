@@ -368,18 +368,26 @@ function startCloud() {
     // chaque compte est rattaché à une ferme : membres/{email} → { ferme: "..." }
     const email = (user.email || '').toLowerCase();
     const cacheKey = STORE + '-ferme-' + email;
+    let why = '';
     try {
       const m = await fs.collection('membres').doc(email).get();
+      if (!m.exists) why = 'absent';
+      else if (!m.data().ferme) why = 'champ';
       ferme = m.exists ? (m.data().ferme || null) : null;
       if (ferme) { try { localStorage.setItem(cacheKey, ferme); } catch (e) {} }
     } catch (e) {
+      why = e.code || 'erreur';
       try { ferme = localStorage.getItem(cacheKey); } catch (x) {} // hors réseau : dernière ferme connue
     }
     if (!ferme) {
       await firebase.auth().signOut();
       const err = document.getElementById('lg-err');
       err.hidden = false;
-      err.textContent = `Le compte ${email} n'est rattaché à aucune ferme. Demandez à la personne qui gère l'application de l'ajouter dans « membres ».`;
+      err.textContent =
+        why === 'absent' ? `Aucun document « ${email} » dans la collection membres. Vérifiez l'ID du document (l'e-mail exact, en minuscules).`
+        : why === 'champ' ? `Le document « ${email} » existe dans membres, mais il n'a pas de champ « ferme » (en minuscules, type string).`
+        : why === 'permission-denied' ? `Les règles Firestore empêchent de lire la liste membres pour ${email}. Recollez les règles du guide puis cliquez sur Publier.`
+        : `Impossible de lire la liste membres pour ${email} (${why}). Vérifiez la connexion internet.`;
       return;
     }
     for (const col of COLS) {
