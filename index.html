@@ -1,0 +1,1193 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Mon Parcellaire</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#2f6b2a">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Parcellaire">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.css">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Condensed:wght@600;700&display=swap">
+<style>
+/* Layout : panneau latéral (registre) + carte satellite plein écran ; empilé sur téléphone */
+:root {
+  --bg: #f3f5ef;
+  --surface: #ffffff;
+  --surface-2: #e9ede2;
+  --fg: #1f2a1c;
+  --muted: #5f6b58;
+  --line: #d3dacb;
+  --accent: #2f6b2a;      /* vert champ */
+  --accent-fg: #ffffff;
+  --wheat: #c99a2e;       /* blé mûr */
+  --danger: #b23a2b;
+  --focus: #e0a920;
+  --font-ui: "Barlow", "Segoe UI", system-ui, sans-serif;
+  --font-head: "Barlow Condensed", "Arial Narrow", "Segoe UI", sans-serif;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #141912; --surface: #1c231a; --surface-2: #252e22; --fg: #e5eadf; --muted: #9aa691;
+    --line: #34402f; --accent: #6fb563; --accent-fg: #0f170d; --wheat: #e0b44c; --danger: #e2735f; color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+[hidden] { display: none !important; }
+html, body { height: 100%; margin: 0; }
+body { background: var(--bg); color: var(--fg); font: 15px/1.45 var(--font-ui);
+  padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px) env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px); }
+button, input, select, textarea { font: inherit; color: inherit; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+h1, h2, h3 { font-family: var(--font-head); font-weight: 700; margin: 0; text-wrap: balance; letter-spacing: .01em; }
+.num { font-variant-numeric: tabular-nums; }
+
+#app { display: grid; grid-template-columns: 400px 1fr; height: 100%; }
+#app.wide { grid-template-columns: min(760px, 62%) 1fr; }
+#panel { background: var(--surface); border-right: 1px solid var(--line); display: flex; flex-direction: column; min-height: 0; min-width: 0; }
+#map { height: 100%; min-height: 0; background: #2b2f27; }
+
+.brand { display: flex; align-items: center; gap: 10px; padding: 14px 16px 10px; }
+.brand svg { flex: none; }
+.brand h1 { font-size: 24px; line-height: 1; }
+.brand small { display: block; color: var(--muted); font-size: 12px; letter-spacing: .06em; text-transform: uppercase; }
+.tabs { display: flex; gap: 2px; padding: 0 12px; border-bottom: 1px solid var(--line); }
+.tabs button { background: none; border: 0; padding: 10px 12px; cursor: pointer; font-weight: 600; color: var(--muted); border-bottom: 3px solid transparent; margin-bottom: -1px; }
+.tabs button[aria-selected="true"] { color: var(--fg); border-bottom-color: var(--accent); }
+.view { flex: 1; overflow: auto; padding: 14px 16px 24px; display: flex; flex-direction: column; gap: 14px; min-height: 0; }
+.view > * { flex-shrink: 0; }
+
+.btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; border: 1px solid var(--line); background: var(--surface); padding: 8px 12px; border-radius: 6px; cursor: pointer; font-weight: 600; white-space: nowrap; }
+.btn:hover { background: var(--surface-2); }
+.btn.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.danger { color: var(--danger); }
+.btn.small { padding: 5px 9px; font-size: 13px; }
+.btn:disabled { opacity: .5; cursor: not-allowed; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.grow { flex: 1; min-width: 0; }
+
+.field { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.field label, .lbl { font-size: 12px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+.field input, .field select, .field textarea, input.inp, select.inp { border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 8px 10px; width: 100%; min-width: 0; }
+.field textarea { min-height: 64px; resize: vertical; }
+.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+
+.summary { display: flex; gap: 18px; padding: 12px 14px; background: var(--surface-2); border-radius: 8px; }
+.summary b { display: block; font-family: var(--font-head); font-size: 26px; line-height: 1.05; }
+.summary span { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: .05em; }
+
+.plist { display: flex; flex-direction: column; }
+.pitem { display: grid; grid-template-columns: 12px 1fr auto; gap: 10px; align-items: center; padding: 10px 6px; border-bottom: 1px solid var(--line); cursor: pointer; background: none; border-left: 0; border-right: 0; border-top: 0; text-align: left; width: 100%; }
+.pitem:hover { background: var(--surface-2); }
+.pitem .sw { width: 12px; height: 12px; border-radius: 3px; }
+.pitem .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pitem .sub { font-size: 13px; color: var(--muted); }
+.pitem .ha { font-variant-numeric: tabular-nums; font-weight: 600; }
+
+.empty { border: 1px dashed var(--line); border-radius: 8px; padding: 18px; color: var(--muted); display: flex; flex-direction: column; gap: 10px; }
+.empty strong { color: var(--fg); }
+
+.dhead { display: flex; flex-direction: column; gap: 4px; }
+.dhead h2 { font-size: 28px; line-height: 1.05; }
+.chip { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; font-weight: 600; padding: 2px 8px; border-radius: 99px; background: var(--surface-2); color: var(--fg); }
+.chip i { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.back { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 0; font-weight: 600; align-self: flex-start; }
+
+.timeline { display: flex; flex-direction: column; gap: 0; }
+.ev { display: grid; grid-template-columns: 74px 1fr auto; gap: 10px; padding: 10px 0; border-bottom: 1px solid var(--line); align-items: start; }
+.ev .d { font-size: 13px; color: var(--muted); font-variant-numeric: tabular-nums; padding-top: 2px; }
+.ev .t { font-weight: 600; display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+.ev .x { font-size: 13px; color: var(--muted); overflow-wrap: anywhere; }
+.ev.inherited { opacity: .72; }
+.ev .acts { display: flex; gap: 4px; }
+.iconbtn { background: none; border: 0; cursor: pointer; color: var(--muted); padding: 4px; border-radius: 4px; }
+.iconbtn:hover { background: var(--surface-2); color: var(--fg); }
+.sep { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 12px 0 4px; font-weight: 600; }
+
+.tag { font-size: 11px; font-weight: 700; text-transform: uppercase; letter-spacing: .05em; padding: 2px 7px; border-radius: 4px; color: #fff; }
+
+/* découpage */
+.pieces { display: flex; flex-direction: column; gap: 6px; }
+.piece { display: grid; grid-template-columns: 14px 1fr 110px; gap: 8px; align-items: center; }
+.piece .sw { width: 14px; height: 14px; border-radius: 3px; }
+.piece input { border: 1px solid var(--line); background: var(--bg); border-radius: 6px; padding: 7px 8px; min-width: 0; width: 100%; }
+.piece input[readonly] { background: var(--surface-2); }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+.seg button { border: 0; background: var(--surface); padding: 7px 10px; cursor: pointer; font-weight: 600; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+.note { font-size: 13px; color: var(--muted); }
+.note.err { color: var(--danger); font-weight: 600; }
+.stepper { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 6px; }
+.stepper button { border: 0; background: none; width: 34px; height: 34px; cursor: pointer; font-size: 18px; }
+.stepper output { min-width: 28px; text-align: center; font-weight: 700; font-variant-numeric: tabular-nums; }
+input[type=range] { width: 100%; accent-color: var(--accent); }
+
+/* registre */
+.tablewrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+table { border-collapse: collapse; width: 100%; font-size: 13px; }
+th, td { text-align: left; padding: 7px 9px; border-bottom: 1px solid var(--line); vertical-align: top; }
+th { background: var(--surface-2); font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--muted); position: sticky; top: 0; }
+td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+/* carte */
+.maptools { position: absolute; top: 10px; left: 54px; right: 10px; z-index: 800; display: flex; gap: 8px; flex-wrap: wrap; pointer-events: none; }
+.maptools > * { pointer-events: auto; }
+.maptools .btn { box-shadow: 0 1px 4px rgba(0,0,0,.25); }
+.search { position: relative; width: min(320px, 100%); }
+.search input { width: 100%; border: 0; border-radius: 6px; padding: 9px 12px; box-shadow: 0 1px 4px rgba(0,0,0,.25); background: var(--surface); }
+.search ul { position: absolute; top: 100%; left: 0; right: 0; margin: 4px 0 0; padding: 0; list-style: none; background: var(--surface); border-radius: 6px; box-shadow: 0 4px 12px rgba(0,0,0,.25); overflow: hidden; }
+.search li button { width: 100%; text-align: left; border: 0; background: none; padding: 8px 12px; cursor: pointer; }
+.search li button:hover { background: var(--surface-2); }
+.modebar { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); z-index: 800; background: var(--surface); padding: 10px 14px; border-radius: 8px; box-shadow: 0 4px 14px rgba(0,0,0,.35); display: flex; gap: 10px; align-items: center; max-width: calc(100% - 32px); flex-wrap: wrap; }
+.mapwrap { position: relative; min-height: 0; min-width: 0; }
+.plabel { background: rgba(20,25,18,.72); color: #fff; border: 0; box-shadow: none; font: 600 12px/1.2 var(--font-ui); padding: 3px 6px; border-radius: 4px; text-align: center; }
+.plabel::before { display: none; }
+.plabel small { font-weight: 500; opacity: .85; }
+.leaflet-container.lowzoom .plabel { display: none; }
+.leaflet-container { font-family: var(--font-ui); }
+
+/* modale */
+.overlay { position: fixed; inset: 0; background: rgba(10,14,9,.55); z-index: 2000; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal { background: var(--surface); border-radius: 10px; width: min(560px, 100%); max-height: 100%; overflow: auto; padding: 18px; display: flex; flex-direction: column; gap: 14px; box-shadow: 0 10px 40px rgba(0,0,0,.4); }
+.modal h3 { font-size: 22px; }
+.typegrid { display: flex; flex-wrap: wrap; gap: 6px; }
+.typegrid button { border: 1px solid var(--line); background: var(--bg); border-radius: 99px; padding: 6px 11px; cursor: pointer; font-weight: 600; font-size: 13px; display: inline-flex; gap: 6px; align-items: center; }
+.typegrid button i { width: 9px; height: 9px; border-radius: 50%; }
+.typegrid button[aria-pressed="true"] { border-color: var(--fg); background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--fg); }
+.checks { display: flex; flex-direction: column; gap: 2px; max-height: 160px; overflow: auto; border: 1px solid var(--line); border-radius: 6px; padding: 6px 8px; }
+.field .checks label { display: flex; flex-direction: row; gap: 8px; align-items: center; font-size: 14px; padding: 2px 0; text-transform: none; letter-spacing: 0; color: var(--fg); font-weight: 500; }
+.field .checks input { width: auto; flex: none; }
+.toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--fg); color: var(--bg); padding: 10px 16px; border-radius: 6px; z-index: 3000; font-weight: 600; max-width: calc(100% - 32px); }
+
+/* GPS, bouton carte agrandie, connexion, synchro */
+.mapbtn { background: var(--surface); border: 0; width: 34px; height: 34px; border-radius: 4px; cursor: pointer; display: grid; place-items: center; font-size: 17px; box-shadow: 0 1px 4px rgba(0,0,0,.3); }
+.mapbtn[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+.mapbtns { position: absolute; left: 10px; top: 86px; z-index: 800; display: flex; flex-direction: column; gap: 8px; }
+#btn-bigmap { display: none; }
+.gps-dot { width: 16px; height: 16px; border-radius: 50%; background: #1e88ff; border: 3px solid #fff; box-shadow: 0 0 0 2px rgba(30,136,255,.4); }
+.sync { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-left: auto; }
+.sync i { width: 8px; height: 8px; border-radius: 50%; background: var(--muted); }
+.sync.ok i { background: #3fae3a; } .sync.wait i { background: var(--wheat); } .sync.off i { background: var(--danger); }
+.login { position: fixed; inset: 0; z-index: 2500; background: var(--bg); display: flex; align-items: center; justify-content: center;
+  padding: max(16px, env(safe-area-inset-top, 0px)) max(16px, env(safe-area-inset-right, 0px)) 16px max(16px, env(safe-area-inset-left, 0px)); }
+.login form { width: min(380px, 100%); display: flex; flex-direction: column; gap: 14px; }
+.login h1 { font-size: 34px; }
+.linkbtn { background: none; border: 0; padding: 0; color: var(--accent); cursor: pointer; font-weight: 600; text-decoration: underline; align-self: flex-start; }
+
+@media (max-width: 760px) {
+  #app, #app.wide { grid-template-columns: 1fr; grid-template-rows: 52vh 1fr; grid-template-rows: 52svh 1fr; }
+  body.bigmap #app { grid-template-rows: 82vh 1fr; grid-template-rows: 82svh 1fr; }
+  .mapwrap { grid-row: 1; }
+  #panel { grid-row: 2; border-right: 0; border-top: 1px solid var(--line); }
+  .brand { padding: 8px 16px 4px; }
+  .brand h1 { font-size: 20px; }
+  .brand svg { width: 26px; height: 26px; }
+  .brand small { display: none; }
+  .tabs button { flex: 1; padding: 11px 6px; }
+  .grid2 { grid-template-columns: 1fr; }
+  .maptools { left: 52px; }
+  .maptools .btn { padding: 8px 10px; }
+  #btn-bigmap { display: grid; }
+  .field input, .field select, .field textarea, input.inp, select.inp, .piece input, .search input { font-size: 16px; } /* évite le zoom auto sur iPhone */
+  .btn { padding: 10px 13px; }
+  .btn.small { padding: 8px 11px; }
+  .overlay { padding: 8px; align-items: flex-end; }
+  .modal { padding: 16px; max-height: calc(100% - 8px); }
+  .modebar { bottom: 12px; }
+  .pitem { padding: 12px 6px; }
+  .tablewrap table { font-size: 12px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="panel">
+    <div class="brand">
+      <svg width="34" height="34" viewBox="0 0 34 34" aria-hidden="true">
+        <rect x="2" y="2" width="30" height="30" rx="5" fill="var(--accent)"/>
+        <path d="M2 14 L32 10 M2 23 L32 20 M15 2 L13 32" stroke="var(--accent-fg)" stroke-width="2" fill="none" opacity=".9"/>
+        <circle cx="23" cy="26" r="3" fill="var(--wheat)"/>
+      </svg>
+      <div><h1>Mon Parcellaire</h1><small>Carnet de plaine</small></div>
+      <span class="sync" id="sync" hidden><i></i><span></span></span>
+    </div>
+    <nav class="tabs" role="tablist">
+      <button role="tab" data-tab="parcels" aria-selected="true">Parcelles</button>
+      <button role="tab" data-tab="registre" aria-selected="false">Registre</button>
+      <button role="tab" data-tab="data" aria-selected="false">Données</button>
+    </nav>
+    <section class="view" id="view-parcels"></section>
+    <section class="view" id="view-detail" hidden></section>
+    <section class="view" id="view-split" hidden></section>
+    <section class="view" id="view-registre" hidden></section>
+    <section class="view" id="view-data" hidden></section>
+  </aside>
+  <div class="mapwrap">
+    <div id="map"></div>
+    <div class="maptools">
+      <div class="search">
+        <input id="geo-q" type="search" placeholder="Aller à une commune, une adresse…" autocomplete="off">
+        <ul id="geo-res" hidden></ul>
+      </div>
+      <button class="btn primary" id="btn-draw" type="button">＋ Dessiner une parcelle</button>
+    </div>
+    <div class="mapbtns">
+      <button class="mapbtn" id="btn-gps" type="button" aria-pressed="false" title="Ma position" aria-label="Afficher ma position">◎</button>
+      <button class="mapbtn" id="btn-bigmap" type="button" aria-pressed="false" title="Agrandir la carte" aria-label="Agrandir la carte">⤢</button>
+    </div>
+    <div class="modebar" id="modebar" hidden></div>
+  </div>
+</div>
+<div class="login" id="login" hidden>
+  <form id="login-form" novalidate>
+    <div class="brand" style="padding:0">
+      <svg width="40" height="40" viewBox="0 0 34 34" aria-hidden="true">
+        <rect x="2" y="2" width="30" height="30" rx="5" fill="var(--accent)"/>
+        <path d="M2 14 L32 10 M2 23 L32 20 M15 2 L13 32" stroke="var(--accent-fg)" stroke-width="2" fill="none" opacity=".9"/>
+        <circle cx="23" cy="26" r="3" fill="var(--wheat)"/>
+      </svg>
+      <div><h1>Mon Parcellaire</h1><small>Carnet de plaine partagé</small></div>
+    </div>
+    <p class="note" style="margin:0">Connectez-vous avec l'adresse e-mail et le mot de passe créés pour vous. Vous resterez connecté sur cet appareil.</p>
+    <div class="field"><label for="lg-email">Adresse e-mail</label><input id="lg-email" type="email" autocomplete="username" inputmode="email"></div>
+    <div class="field"><label for="lg-pass">Mot de passe</label><input id="lg-pass" type="password" autocomplete="current-password"></div>
+    <p class="note err" id="lg-err" hidden></p>
+    <button class="btn primary" type="submit" id="lg-ok">Se connecter</button>
+    <button class="linkbtn" type="button" id="lg-forgot">Mot de passe oublié</button>
+  </form>
+</div>
+<div id="overlay" class="overlay" hidden><div class="modal" id="modal" role="dialog" aria-modal="true"></div></div>
+<div id="toast" class="toast" hidden></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
+<script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
+<script src="https://unpkg.com/shpjs@4.0.4/dist/shp.min.js"></script>
+<script src="config.js"></script>
+<script>
+  if (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey) {
+    document.write('<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"><\/script>' +
+      '<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"><\/script>' +
+      '<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"><\/script>');
+  }
+</script>
+<script>
+'use strict';
+/* ============ Données ============ */
+const STORE = 'mon-parcellaire-v1';
+let db = { parcels: [], interventions: [] };
+// Deux modes : local (ce navigateur seulement) ou partagé (base Firebase commune, si config.js est rempli)
+const CLOUD = !!(window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey && window.firebase);
+const COLS = ['parcels', 'interventions'];
+let fs = null, me = null, cloudReady = { parcels: false, interventions: false }, unsubs = [];
+const synced = { parcels: new Map(), interventions: new Map() };
+function load() {
+  if (CLOUD) return;
+  try { const s = localStorage.getItem(STORE); if (s) db = JSON.parse(s); } catch (e) { console.warn(e); }
+  db.parcels ||= []; db.interventions ||= [];
+}
+// Firestore n'accepte pas les tableaux imbriqués : la géométrie est stockée en texte
+const toFs = (col, d) => { const o = JSON.parse(JSON.stringify(d)); if (col === 'parcels') o.geometry = JSON.stringify(d.geometry); return o; };
+const fromFs = (col, d) => { if (col === 'parcels' && typeof d.geometry === 'string') d.geometry = JSON.parse(d.geometry); return d; };
+function save() {
+  if (!CLOUD) {
+    try { localStorage.setItem(STORE, JSON.stringify(db)); }
+    catch (e) { toast("Impossible d'enregistrer : exportez une sauvegarde depuis l'onglet Données."); }
+    return;
+  }
+  if (!fs || !me) return;
+  // n'envoie que les fiches modifiées ou supprimées depuis la dernière synchro
+  const ops = [];
+  for (const col of COLS) {
+    const seen = new Set();
+    for (const d of db[col]) {
+      seen.add(d.id);
+      const s = JSON.stringify(d);
+      if (synced[col].get(d.id) !== s) { synced[col].set(d.id, s); ops.push(b => b.set(fs.collection(col).doc(d.id), toFs(col, d))); }
+    }
+    for (const id of [...synced[col].keys()]) if (!seen.has(id)) { synced[col].delete(id); ops.push(b => b.delete(fs.collection(col).doc(id))); }
+  }
+  for (let i = 0; i < ops.length; i += 400) {
+    const b = fs.batch(); ops.slice(i, i + 400).forEach(op => op(b));
+    b.commit().catch(e => { console.warn(e); setSync('off', 'Erreur'); toast("Enregistrement refusé par la base : " + (e.code || e.message)); });
+  }
+}
+function setSync(state, label) {
+  const s = document.getElementById('sync'); if (!s) return;
+  s.hidden = false; s.className = 'sync ' + state; s.lastElementChild.textContent = label;
+}
+let pendingRefresh = false;
+const latest = { parcels: null, interventions: null };
+const busy = () => !!mode || !document.getElementById('overlay').hidden;
+// applique les dernières données reçues, sauf pendant un dessin, un découpage ou un formulaire ouvert (on le fera à la fermeture)
+function applyLatest() {
+  if (busy()) { pendingRefresh = true; return; }
+  let changed = false;
+  for (const col of COLS) {
+    if (!latest[col]) continue;
+    const m = new Map(latest[col].map(x => [x.id, JSON.stringify(x)]));
+    const same = m.size === db[col].length && db[col].every(x => m.get(x.id) === JSON.stringify(x));
+    if (!same) { db[col] = latest[col]; changed = true; }
+    synced[col] = m; latest[col] = null;
+  }
+  pendingRefresh = false;
+  if (changed) refreshUI();
+}
+function refreshUI() {
+  if (busy()) { pendingRefresh = true; return; }
+  pendingRefresh = false;
+  renderMap();
+  if (!$('#view-detail').hidden) { if (selected && byId(selected) && !byId(selected).archived) openDetail(selected); else { selected = null; renderParcels(); showView('parcels'); } }
+  else if (!$('#view-registre').hidden) renderRegistre();
+  else if (!$('#view-data').hidden) renderData();
+  else renderParcels();
+}
+function startCloud() {
+  firebase.initializeApp(window.FIREBASE_CONFIG);
+  fs = firebase.firestore();
+  fs.enablePersistence({ synchronizeTabs: true }).catch(() => {}); // fonctionne hors réseau, synchronise au retour
+  const lg = document.getElementById('login');
+  firebase.auth().onAuthStateChanged(user => {
+    unsubs.forEach(u => u()); unsubs = [];
+    me = user;
+    if (!user) { lg.hidden = false; db = { parcels: [], interventions: [] }; return; }
+    lg.hidden = true;
+    setSync('wait', 'Connexion…');
+    for (const col of COLS) {
+      cloudReady[col] = false;
+      unsubs.push(fs.collection(col).onSnapshot({ includeMetadataChanges: true }, snap => {
+        latest[col] = snap.docs.map(d => fromFs(col, d.data()));
+        const first = !cloudReady[col]; cloudReady[col] = true;
+        applyLatest();
+        if (first) refreshUI();
+        if (first && COLS.every(c => cloudReady[c]) && active().length && !localStorage.getItem(STORE + '-view')) fitAll();
+        if (snap.metadata.hasPendingWrites) setSync('wait', 'Envoi…');
+        else if (snap.metadata.fromCache) setSync('wait', 'Hors ligne');
+        else setSync('ok', 'Synchronisé');
+      }, err => { console.warn(err); setSync('off', 'Accès refusé'); toast("La base commune refuse l'accès : vérifiez les règles Firestore (voir le guide)."); }));
+    }
+  });
+  document.getElementById('login-form').addEventListener('submit', async e => {
+    e.preventDefault();
+    const err = document.getElementById('lg-err'); err.hidden = true;
+    const btn = document.getElementById('lg-ok'); btn.disabled = true; btn.textContent = 'Connexion…';
+    try { await firebase.auth().signInWithEmailAndPassword(document.getElementById('lg-email').value.trim(), document.getElementById('lg-pass').value); }
+    catch (x) {
+      err.hidden = false;
+      err.textContent = /network/.test(x.code) ? 'Pas de réseau. Il faut une connexion pour la première connexion.'
+        : 'Adresse e-mail ou mot de passe incorrect.';
+    }
+    btn.disabled = false; btn.textContent = 'Se connecter';
+  });
+  document.getElementById('lg-forgot').onclick = async () => {
+    const email = document.getElementById('lg-email').value.trim();
+    const err = document.getElementById('lg-err'); err.hidden = false;
+    if (!email) { err.textContent = 'Tapez d\'abord votre adresse e-mail ci-dessus.'; return; }
+    try { await firebase.auth().sendPasswordResetEmail(email); err.textContent = 'Un e-mail pour changer le mot de passe vient d\'être envoyé à ' + email + '.'; }
+    catch (x) { err.textContent = 'Envoi impossible : vérifiez l\'adresse.'; }
+  };
+}
+const whoAmI = () => me && me.email ? me.email.split('@')[0] : '';
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const today = () => new Date().toISOString().slice(0, 10);
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const fmtHa = v => (Math.round(v * 100) / 100).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmtDate = d => d ? new Date(d + 'T12:00').toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '';
+const areaHa = geom => turf.area(turf.feature(geom)) / 10000;
+const active = () => db.parcels.filter(p => !p.archived);
+const byId = id => db.parcels.find(p => p.id === id);
+
+const PALETTE = ['#e6b422', '#5fb04f', '#3f8fd2', '#d8603a', '#a56ad1', '#2bb3a3', '#c94f7c', '#8db83a', '#e08b2f', '#6a7fd6', '#b58b5a', '#46a0c9'];
+function cultureColor(c) {
+  if (!c) return '#d9d9d9';
+  let h = 0; for (const ch of c.toLowerCase().trim()) h = (h * 31 + ch.charCodeAt(0)) >>> 0;
+  return PALETTE[h % PALETTE.length];
+}
+
+/* Types d'intervention et leurs champs */
+const F = {
+  culture: { label: 'Culture', type: 'text', list: 'dl-cultures' },
+  variete: { label: 'Variété', type: 'text' },
+  produit: { label: 'Produit', type: 'text', list: 'dl-produits' },
+  especes: { label: 'Espèces du couvert', type: 'text', ph: 'ex. avoine, phacélie, vesce' },
+  phase: { label: 'Étape', type: 'select', opts: ['Semis du couvert', 'Destruction du couvert'] },
+  dose: { label: 'Dose', type: 'number', step: 'any' },
+  unite: { label: 'Unité', type: 'select' },
+  unitesN: { label: 'Unités N / ha', type: 'number', step: 'any' },
+  cible: { label: 'Cible (ravageur, maladie, adventice)', type: 'text' },
+  bouillie: { label: 'Volume de bouillie (L/ha)', type: 'number', step: 'any' },
+  materiel: { label: 'Matériel / outil', type: 'text', list: 'dl-materiel' },
+  profondeur: { label: 'Profondeur (cm)', type: 'number', step: 'any' },
+  rendement: { label: 'Rendement (q/ha)', type: 'number', step: 'any' },
+  humidite: { label: 'Humidité (%)', type: 'number', step: 'any' },
+  mm: { label: 'Apport (mm)', type: 'number', step: 'any' },
+  description: { label: 'Description', type: 'text' },
+};
+const TYPES = {
+  semis:       { label: 'Semis', color: '#3c8d2f', fields: ['culture', 'variete', 'dose', 'unite', 'materiel'], units: ['kg/ha', 'grains/m²', 'graines/ha', 'q/ha'] },
+  couvert:     { label: 'Couvert végétal', color: '#7aa53a', fields: ['phase', 'especes', 'dose', 'unite', 'materiel'], units: ['kg/ha', 'grains/m²'] },
+  engrais:     { label: 'Engrais', color: '#2f7fc1', fields: ['produit', 'dose', 'unite', 'unitesN', 'materiel'], units: ['kg/ha', 'L/ha', 'q/ha', 't/ha'] },
+  amendement:  { label: 'Amendement / organique', color: '#8a6a3b', fields: ['produit', 'dose', 'unite', 'materiel'], units: ['t/ha', 'm³/ha', 'kg/ha'] },
+  traitement:  { label: 'Traitement phyto', color: '#c24a3a', fields: ['produit', 'dose', 'unite', 'cible', 'bouillie', 'materiel'], units: ['L/ha', 'kg/ha', 'g/ha', 'mL/ha'] },
+  sol:         { label: 'Travail du sol', color: '#9b7b52', fields: ['materiel', 'profondeur'] },
+  recolte:     { label: 'Récolte', color: '#d1a024', fields: ['culture', 'rendement', 'humidite', 'materiel'] },
+  irrigation:  { label: 'Irrigation', color: '#2aa3c4', fields: ['mm', 'materiel'] },
+  observation: { label: 'Observation', color: '#7d6bb8', fields: [] },
+  autre:       { label: 'Autre', color: '#6f7a68', fields: ['description', 'produit', 'dose', 'unite', 'materiel'], units: ['kg/ha', 'L/ha', 't/ha', 'u/ha'] },
+};
+function evSummary(ev) {
+  const parts = [];
+  const add = (k, suffix = '') => { if (ev[k] !== undefined && ev[k] !== '' && ev[k] !== null) parts.push(esc(ev[k]) + suffix); };
+  if (ev.type === 'couvert') add('phase');
+  add('culture'); add('variete'); add('especes'); add('produit'); add('description');
+  if (ev.dose !== '' && ev.dose != null) parts.push(esc(ev.dose) + ' ' + esc(ev.unite || ''));
+  if (ev.unitesN) parts.push(esc(ev.unitesN) + ' u N');
+  add('cible'); if (ev.bouillie) parts.push(esc(ev.bouillie) + ' L bouillie');
+  if (ev.rendement) parts.push(esc(ev.rendement) + ' q/ha'); if (ev.humidite) parts.push(esc(ev.humidite) + ' % hum.');
+  if (ev.mm) parts.push(esc(ev.mm) + ' mm'); if (ev.profondeur) parts.push(esc(ev.profondeur) + ' cm');
+  add('materiel');
+  return parts.join(' · ');
+}
+
+/* ============ Carte ============ */
+const geopf = (layer, fmt, style = 'normal') =>
+  `https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${layer}&STYLE=${style}&TILEMATRIXSET=PM&FORMAT=${fmt}&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}`;
+const baseLayers = {
+  'Satellite IGN (France)': L.tileLayer(geopf('ORTHOIMAGERY.ORTHOPHOTOS', 'image/jpeg'), { maxZoom: 21, maxNativeZoom: 19, attribution: '© IGN Géoplateforme' }),
+  'Satellite Esri (monde)': L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', { maxZoom: 21, maxNativeZoom: 19, attribution: 'Esri, Maxar' }),
+  'Plan IGN': L.tileLayer(geopf('GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2', 'image/png'), { maxZoom: 21, maxNativeZoom: 19, attribution: '© IGN' }),
+};
+const overlays = {
+  'Cadastre': L.tileLayer(geopf('CADASTRALPARCELS.PARCELLAIRE_EXPRESS', 'image/png', 'PCI%20vecteur'), { maxZoom: 21, maxNativeZoom: 19, opacity: .85 }),
+  'Îlots PAC (RPG)': L.tileLayer(geopf('LANDUSE.AGRICULTURE.LATEST', 'image/png'), { maxZoom: 21, maxNativeZoom: 19, opacity: .6 }),
+};
+let view = { c: [46.6, 2.4], z: 6 };
+try { const v = JSON.parse(localStorage.getItem(STORE + '-view')); if (v) view = v; } catch (e) {}
+const map = L.map('map', { zoomControl: true, layers: [baseLayers['Satellite IGN (France)']] }).setView(view.c, view.z);
+L.control.layers(baseLayers, overlays, { position: 'bottomright' }).addTo(map);
+L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
+map.on('moveend', () => {
+  try { localStorage.setItem(STORE + '-view', JSON.stringify({ c: [map.getCenter().lat, map.getCenter().lng], z: map.getZoom() })); } catch (e) {}
+});
+map.on('zoomend', () => map.getContainer().classList.toggle('lowzoom', map.getZoom() < 14));
+map.getContainer().classList.toggle('lowzoom', map.getZoom() < 14);
+map.pm.setLang('fr');
+
+const parcelLayer = L.featureGroup().addTo(map);
+const previewLayer = L.featureGroup().addTo(map);
+const layers = {};
+let selected = null;
+let mode = null; // null | 'draw' | 'edit' | 'split'
+
+function renderMap() {
+  parcelLayer.clearLayers();
+  for (const k in layers) delete layers[k];
+  for (const p of active()) {
+    const col = cultureColor(p.culture);
+    const isSel = p.id === selected;
+    const lyr = L.geoJSON(turf.feature(p.geometry), {
+      style: { color: isSel ? '#ffffff' : col, weight: isSel ? 3.5 : 2, fillColor: col, fillOpacity: isSel ? .38 : .22 },
+      pmIgnore: true,
+    });
+    lyr.bindTooltip(`${esc(p.name)}<br><small>${fmtHa(p.area)} ha${p.culture ? ' · ' + esc(p.culture) : ''}</small>`,
+      { permanent: true, direction: 'center', className: 'plabel', interactive: false });
+    lyr.on('click', () => { if (!mode) openDetail(p.id); });
+    lyr.addTo(parcelLayer);
+    layers[p.id] = lyr;
+  }
+}
+function zoomTo(id) { const l = layers[id]; if (l) map.fitBounds(l.getBounds(), { padding: [40, 40], maxZoom: 18 }); }
+
+/* recherche d'adresse (Géoplateforme) */
+const geoQ = document.getElementById('geo-q'), geoRes = document.getElementById('geo-res');
+let geoT;
+geoQ.addEventListener('input', () => {
+  clearTimeout(geoT);
+  const q = geoQ.value.trim();
+  if (q.length < 3) { geoRes.hidden = true; return; }
+  geoT = setTimeout(async () => {
+    try {
+      const r = await fetch('https://data.geopf.fr/geocodage/search?limit=6&q=' + encodeURIComponent(q));
+      const j = await r.json();
+      geoRes.innerHTML = j.features.map((f, i) => `<li><button type="button" data-i="${i}">${esc(f.properties.label)}</button></li>`).join('');
+      geoRes.hidden = !j.features.length;
+      geoRes.querySelectorAll('button').forEach(b => b.onclick = () => {
+        const f = j.features[+b.dataset.i]; const [x, y] = f.geometry.coordinates;
+        map.setView([y, x], f.properties.type === 'municipality' ? 14 : 17);
+        geoRes.hidden = true; geoQ.value = f.properties.label;
+      });
+    } catch (e) { geoRes.hidden = true; }
+  }, 300);
+});
+document.addEventListener('click', e => { if (!e.target.closest('.search')) geoRes.hidden = true; });
+
+/* ============ UI générique ============ */
+const $ = s => document.querySelector(s);
+function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(t._t); t._t = setTimeout(() => t.hidden = true, 3200); }
+function openModal(html) { $('#modal').innerHTML = html; $('#overlay').hidden = false; const f = $('#modal').querySelector('input,select,textarea,button'); f && f.focus(); }
+function closeModal() { $('#overlay').hidden = true; $('#modal').innerHTML = ''; }
+$('#overlay').addEventListener('mousedown', e => { if (e.target.id === 'overlay') closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape' && !$('#overlay').hidden) closeModal(); });
+function confirmBox(title, text, okLabel, onOk, danger = true) {
+  openModal(`<h3>${esc(title)}</h3><p style="margin:0">${text}</p>
+    <div class="row" style="justify-content:flex-end"><button class="btn" id="c-no">Annuler</button>
+    <button class="btn ${danger ? 'danger' : 'primary'}" id="c-ok">${esc(okLabel)}</button></div>`);
+  $('#c-no').onclick = closeModal; $('#c-ok').onclick = () => { closeModal(); onOk(); };
+}
+function showModebar(html) { const m = $('#modebar'); m.innerHTML = html; m.hidden = false; }
+function hideModebar() { $('#modebar').hidden = true; }
+
+const views = ['parcels', 'detail', 'split', 'registre', 'data'];
+function showView(v) {
+  views.forEach(x => $('#view-' + x).hidden = x !== v);
+  $('#app').classList.toggle('wide', v === 'registre');
+  setTimeout(() => map.invalidateSize(), 50);
+  const tab = v === 'detail' || v === 'split' ? 'parcels' : v;
+  document.querySelectorAll('.tabs button').forEach(b => b.setAttribute('aria-selected', b.dataset.tab === tab));
+}
+document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
+  if (mode === 'split') cancelSplit();
+  if (b.dataset.tab === 'parcels') { selected = null; renderMap(); renderParcels(); showView('parcels'); }
+  if (b.dataset.tab === 'registre') { renderRegistre(); showView('registre'); }
+  if (b.dataset.tab === 'data') { renderData(); showView('data'); }
+});
+
+/* ============ Liste des parcelles ============ */
+let listFilter = '';
+function renderParcels() {
+  const ps = active();
+  const total = ps.reduce((s, p) => s + p.area, 0);
+  const cultures = {};
+  ps.forEach(p => { const c = p.culture || 'Non renseignée'; cultures[c] = (cultures[c] || 0) + p.area; });
+  const f = listFilter.toLowerCase();
+  const shown = ps.filter(p => !f || (p.name + ' ' + (p.culture || '') + ' ' + (p.ilot || '')).toLowerCase().includes(f))
+    .sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true }));
+  $('#view-parcels').innerHTML = ps.length ? `
+    <div class="summary">
+      <div><b class="num">${ps.length}</b><span>parcelles</span></div>
+      <div><b class="num">${fmtHa(total)}</b><span>hectares</span></div>
+      <div><b class="num">${Object.keys(cultures).length}</b><span>cultures</span></div>
+    </div>
+    <div class="row">${Object.entries(cultures).sort((a, b) => b[1] - a[1]).map(([c, a]) =>
+      `<span class="chip"><i style="background:${cultureColor(c === 'Non renseignée' ? '' : c)}"></i>${esc(c)} <span class="num">${fmtHa(a)} ha</span></span>`).join('')}</div>
+    <div class="row">
+      <input class="inp grow" id="p-filter" type="search" placeholder="Filtrer (nom, culture, îlot)" value="${esc(listFilter)}">
+      <button class="btn primary" id="p-add-ev" type="button">＋ Intervention</button>
+    </div>
+    <div class="plist">${shown.map(p => `
+      <button class="pitem" data-id="${p.id}" type="button">
+        <span class="sw" style="background:${cultureColor(p.culture)}"></span>
+        <span style="min-width:0"><span class="nm" style="display:block">${esc(p.name)}</span>
+          <span class="sub">${esc(p.culture || 'Culture non renseignée')}${p.ilot ? ' · îlot ' + esc(p.ilot) : ''}</span></span>
+        <span class="ha">${fmtHa(p.area)} ha</span>
+      </button>`).join('') || '<p class="note">Aucune parcelle ne correspond au filtre.</p>'}</div>`
+  : `<div class="empty">
+      <strong>Aucune parcelle pour l'instant</strong>
+      <span>1. Cherchez votre commune dans la barre en haut de la carte.<br>
+      2. Cliquez <b>＋ Dessiner une parcelle</b> puis cliquez chaque angle du champ sur la vue satellite. Cliquez le premier point pour fermer.<br>
+      3. Ou importez votre fichier PAC (Telepac, shapefile .zip), un KML ou un GeoJSON depuis l'onglet <b>Données</b>.</span>
+      <div class="row"><button class="btn primary" id="e-draw" type="button">Dessiner ma première parcelle</button>
+      <button class="btn" id="e-demo" type="button">Charger un exemple</button></div>
+    </div>`;
+  const pf = $('#p-filter');
+  if (pf) pf.oninput = () => { listFilter = pf.value; const pos = pf.selectionStart; renderParcels(); const n = $('#p-filter'); n.focus(); n.setSelectionRange(pos, pos); };
+  document.querySelectorAll('.pitem').forEach(b => b.onclick = () => { openDetail(b.dataset.id); zoomTo(b.dataset.id); });
+  const pa = $('#p-add-ev'); if (pa) pa.onclick = () => openEventForm([]);
+  const ed = $('#e-draw'); if (ed) ed.onclick = startDraw;
+  const dm = $('#e-demo'); if (dm) dm.onclick = loadDemo;
+}
+
+/* ============ Fiche parcelle ============ */
+function ancestors(p) { const out = []; let cur = p; while (cur && cur.parentId) { cur = byId(cur.parentId); if (cur) out.push(cur); } return out; }
+function openDetail(id) {
+  if (mode === 'split') cancelSplit();
+  selected = id; renderMap();
+  const p = byId(id); if (!p) return;
+  const own = db.interventions.filter(e => e.parcelId === id).sort((a, b) => b.date.localeCompare(a.date));
+  const anc = ancestors(p);
+  const parent = p.parentId ? byId(p.parentId) : null;
+  const evRow = (e, inh) => {
+    const t = TYPES[e.type] || TYPES.autre;
+    return `<div class="ev${inh ? ' inherited' : ''}">
+      <div class="d">${fmtDate(e.date)}</div>
+      <div style="min-width:0"><div class="t"><span class="tag" style="background:${t.color}">${t.label}</span>
+        ${e.surface ? `<span class="note num">${fmtHa(+e.surface)} ha</span>` : ''}${e.by ? `<span class="note">· ${esc(e.by)}</span>` : ''}</div>
+        <div class="x">${evSummary(e) || ''}${e.notes ? (evSummary(e) ? '<br>' : '') + esc(e.notes) : ''}</div></div>
+      <div class="acts">${inh ? '' : `<button class="iconbtn" data-edit="${e.id}" title="Modifier" aria-label="Modifier">✎</button>
+        <button class="iconbtn" data-del="${e.id}" title="Supprimer" aria-label="Supprimer">✕</button>`}</div></div>`;
+  };
+  let inheritedHtml = '';
+  anc.forEach(a => {
+    const evs = db.interventions.filter(e => e.parcelId === a.id).sort((x, y) => y.date.localeCompare(x.date));
+    if (evs.length) inheritedHtml += `<div class="sep">Avant découpage · ${esc(a.name)} (${fmtHa(a.area)} ha)</div>` + evs.map(e => evRow(e, true)).join('');
+  });
+  const siblingsSplit = parent ? db.parcels.filter(x => x.parentId === parent.id).some(x => x.archived) : false;
+  $('#view-detail').innerHTML = `
+    <button class="back" id="d-back" type="button">← Toutes les parcelles</button>
+    <div class="dhead">
+      <h2>${esc(p.name)}</h2>
+      <div class="row"><span class="chip"><i style="background:${cultureColor(p.culture)}"></i>${esc(p.culture || 'Culture non renseignée')}</span>
+        <span class="chip num">${fmtHa(p.area)} ha</span>${p.ilot ? `<span class="chip">Îlot ${esc(p.ilot)}</span>` : ''}</div>
+      ${p.notes ? `<p class="note" style="margin:4px 0 0">${esc(p.notes)}</p>` : ''}
+      ${parent ? `<p class="note" style="margin:4px 0 0">Issue du découpage de « ${esc(parent.name)} » le ${fmtDate(parent.splitDate)}.</p>` : ''}
+    </div>
+    <div class="row">
+      <button class="btn primary" id="d-ev" type="button">＋ Intervention</button>
+      <button class="btn" id="d-split" type="button">✂ Découper</button>
+      <button class="btn" id="d-geom" type="button">Modifier le contour</button>
+      <button class="btn" id="d-info" type="button">Renommer / infos</button>
+    </div>
+    <div>
+      <h3 style="font-size:19px">Historique</h3>
+      <div class="timeline">${own.map(e => evRow(e, false)).join('') || (inheritedHtml ? '' : '<p class="note">Aucune intervention enregistrée sur cette parcelle.</p>')}${inheritedHtml}</div>
+    </div>
+    <div class="row" style="margin-top:auto;padding-top:10px">
+      ${parent && !siblingsSplit ? `<button class="btn small" id="d-unsplit" type="button">Annuler le découpage</button>` : ''}
+      <button class="btn small danger" id="d-del" type="button">Supprimer la parcelle</button>
+    </div>`;
+  showView('detail');
+  $('#d-back').onclick = () => { selected = null; renderMap(); renderParcels(); showView('parcels'); };
+  $('#d-ev').onclick = () => openEventForm([id]);
+  $('#d-split').onclick = () => startSplit(id);
+  $('#d-geom').onclick = () => startEditGeom(id);
+  $('#d-info').onclick = () => openParcelForm(id);
+  $('#d-del').onclick = () => confirmBox('Supprimer la parcelle', `« ${esc(p.name)} » et ses ${own.length} intervention(s) seront supprimées.`, 'Supprimer', () => {
+    db.parcels = db.parcels.filter(x => x.id !== id);
+    db.interventions = db.interventions.filter(e => e.parcelId !== id);
+    save(); selected = null; renderMap(); renderParcels(); showView('parcels'); toast('Parcelle supprimée');
+  });
+  const us = $('#d-unsplit');
+  if (us) us.onclick = () => confirmBox('Annuler le découpage', `Les morceaux redeviennent la parcelle « ${esc(parent.name)} ». Leurs interventions y sont rattachées.`, 'Rassembler', () => {
+    const kids = db.parcels.filter(x => x.parentId === parent.id);
+    const kidIds = new Set(kids.map(k => k.id));
+    db.interventions.forEach(e => { if (kidIds.has(e.parcelId)) e.parcelId = parent.id; });
+    db.parcels = db.parcels.filter(x => !kidIds.has(x.id));
+    parent.archived = false; delete parent.splitDate;
+    save(); openDetail(parent.id); toast('Découpage annulé');
+  }, false);
+  document.querySelectorAll('[data-edit]').forEach(b => b.onclick = () => {
+    const e = db.interventions.find(x => x.id === b.dataset.edit); openEventForm([e.parcelId], e);
+  });
+  document.querySelectorAll('[data-del]').forEach(b => b.onclick = () => confirmBox('Supprimer l\'intervention', 'Cette intervention sera retirée de l\'historique.', 'Supprimer', () => {
+    db.interventions = db.interventions.filter(x => x.id !== b.dataset.del); save(); openDetail(id);
+  }));
+}
+
+/* ============ Formulaire parcelle ============ */
+function datalists() {
+  const uniq = arr => [...new Set(arr.filter(Boolean))].sort((a, b) => a.localeCompare(b, 'fr'));
+  const cultures = uniq([...db.parcels.map(p => p.culture), ...db.interventions.map(e => e.culture),
+    'Blé tendre', 'Blé dur', 'Orge d\'hiver', 'Orge de printemps', 'Colza', 'Maïs grain', 'Maïs ensilage', 'Tournesol', 'Pois', 'Féverole', 'Betterave', 'Pomme de terre', 'Lin', 'Soja', 'Prairie temporaire', 'Prairie permanente', 'Jachère', 'Luzerne', 'Triticale', 'Avoine', 'Seigle']);
+  const produits = uniq(db.interventions.map(e => e.produit));
+  const materiel = uniq(db.interventions.map(e => e.materiel));
+  return `<datalist id="dl-cultures">${cultures.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+    <datalist id="dl-produits">${produits.map(c => `<option value="${esc(c)}">`).join('')}</datalist>
+    <datalist id="dl-materiel">${materiel.map(c => `<option value="${esc(c)}">`).join('')}</datalist>`;
+}
+function openParcelForm(id, onCancel) {
+  const p = byId(id);
+  openModal(`<h3>${onCancel ? 'Nouvelle parcelle' : 'Infos de la parcelle'}</h3>
+    <p class="note" style="margin:0">Surface mesurée sur le plan : <b class="num">${fmtHa(p.area)} ha</b></p>
+    <div class="field"><label for="pf-name">Nom</label><input id="pf-name" value="${esc(p.name)}"></div>
+    <div class="grid2">
+      <div class="field"><label for="pf-cult">Culture en place</label><input id="pf-cult" list="dl-cultures" value="${esc(p.culture || '')}"></div>
+      <div class="field"><label for="pf-ilot">N° d'îlot PAC</label><input id="pf-ilot" value="${esc(p.ilot || '')}"></div>
+    </div>
+    <div class="field"><label for="pf-notes">Notes (type de sol, accès…)</label><textarea id="pf-notes">${esc(p.notes || '')}</textarea></div>
+    ${datalists()}
+    <div class="row" style="justify-content:flex-end"><button class="btn" id="pf-cancel">Annuler</button><button class="btn primary" id="pf-ok">Enregistrer</button></div>`);
+  $('#pf-name').select();
+  $('#pf-cancel').onclick = () => { closeModal(); onCancel && onCancel(); };
+  $('#pf-ok').onclick = () => {
+    p.name = $('#pf-name').value.trim() || p.name; p.culture = $('#pf-cult').value.trim();
+    p.ilot = $('#pf-ilot').value.trim(); p.notes = $('#pf-notes').value.trim();
+    save(); closeModal(); openDetail(p.id); toast('Parcelle enregistrée');
+  };
+}
+
+/* ============ Dessin / modification de contour ============ */
+$('#btn-draw').onclick = startDraw;
+function startDraw() {
+  if (mode) return;
+  mode = 'draw';
+  map.pm.enableDraw('Polygon', { snappable: true, allowSelfIntersection: false, templineStyle: { color: '#ffd84a' }, hintlineStyle: { color: '#ffd84a', dashArray: '5,5' }, pathOptions: { color: '#ffd84a' } });
+  showModebar(`<span>Cliquez chaque angle du champ. Cliquez le premier point pour fermer.</span><button class="btn small" id="mb-cancel">Annuler</button>`);
+  $('#mb-cancel').onclick = () => { map.pm.disableDraw(); mode = null; hideModebar(); };
+}
+map.on('pm:create', e => {
+  if (mode !== 'draw') return;
+  const geom = e.layer.toGeoJSON().geometry; map.removeLayer(e.layer);
+  mode = null; hideModebar();
+  const n = active().length + 1;
+  const p = { id: uid(), name: 'Parcelle ' + n, culture: '', geometry: geom, area: areaHa(geom), createdAt: today() };
+  db.parcels.push(p); save(); renderMap(); renderParcels();
+  openParcelForm(p.id, () => openDetail(p.id));
+});
+function startEditGeom(id) {
+  const p = byId(id); if (mode) return;
+  mode = 'edit';
+  const tmp = L.geoJSON(turf.feature(p.geometry), { style: { color: '#ffd84a', weight: 3, fillOpacity: .15 } }).addTo(map);
+  layers[id] && parcelLayer.removeLayer(layers[id]);
+  tmp.eachLayer(l => l.pm.enable({ allowSelfIntersection: false, snappable: true }));
+  showModebar(`<span>Déplacez les points. Cliquez un point pour le supprimer.</span><button class="btn small" id="mb-cancel">Annuler</button><button class="btn small primary" id="mb-ok">Terminer</button>`);
+  const end = () => { tmp.eachLayer(l => l.pm.disable()); map.removeLayer(tmp); mode = null; hideModebar(); renderMap(); };
+  $('#mb-cancel').onclick = end;
+  $('#mb-ok').onclick = () => {
+    let geom = null; tmp.eachLayer(l => geom = l.toGeoJSON().geometry);
+    if (geom) { p.geometry = geom; p.area = areaHa(geom); save(); }
+    end(); openDetail(id); toast('Contour mis à jour : ' + fmtHa(p.area) + ' ha');
+  };
+}
+
+/* ============ Découpage ============ */
+const PIECE_COLORS = ['#ffd84a', '#4fd1ff', '#ff6fb1', '#8cff6a', '#ff9d3c', '#b993ff', '#5cffd0', '#ff5e5e', '#e4ff3c', '#6aa8ff', '#ffc2f0', '#c9a36a'];
+let split = null;
+
+// Découpe un polygone en bandes parallèles dont les surfaces valent targetsHa (la dernière = le reste)
+function computeSplit(geom, targetsHa, angle, reverse) {
+  const f = turf.feature(geom);
+  const pivot = turf.centroid(f);
+  const r = turf.transformRotate(f, -angle, { pivot });
+  const scale = turf.area(r) / turf.area(f);
+  const [minX, minY, maxX, maxY] = turf.bbox(r);
+  const pad = 0.01;
+  const rect = x => reverse ? turf.bboxPolygon([x, minY - pad, maxX + pad, maxY + pad]) : turf.bboxPolygon([minX - pad, minY - pad, x, maxY + pad]);
+  let remaining = r;
+  const pieces = [];
+  for (let i = 0; i < targetsHa.length - 1; i++) {
+    const target = targetsHa[i] * 10000 * scale;
+    let lo = minX, hi = maxX;
+    for (let k = 0; k < 48; k++) {
+      const x = (lo + hi) / 2;
+      const inter = turf.intersect(remaining, rect(x));
+      const a = inter ? turf.area(inter) : 0;
+      if ((a < target) !== reverse) lo = x; else hi = x;
+    }
+    const x = (lo + hi) / 2;
+    const piece = turf.intersect(remaining, rect(x));
+    if (!piece) return null;
+    pieces.push(piece);
+    remaining = turf.difference(remaining, rect(x));
+    if (!remaining) return null;
+  }
+  pieces.push(remaining);
+  return pieces.map(pc => {
+    const back = turf.transformRotate(pc, angle, { pivot });
+    return { geometry: back.geometry, area: turf.area(back) / 10000 };
+  });
+}
+// orientation par défaut : rectangle englobant minimal, coupes perpendiculaires à la plus grande longueur
+function bestAngle(geom) {
+  const f = turf.feature(geom), pivot = turf.centroid(f);
+  const k = Math.cos(pivot.geometry.coordinates[1] * Math.PI / 180);
+  let best = 0, bestA = Infinity, bestWide = true;
+  for (let a = 0; a < 180; a++) {
+    const b = turf.bbox(turf.transformRotate(f, -a, { pivot }));
+    const w = (b[2] - b[0]) * k, h = b[3] - b[1];
+    if (w * h < bestA - 1e-12) { bestA = w * h; best = a; bestWide = w >= h; }
+  }
+  return bestWide ? best : (best + 90) % 180;
+}
+const LETTERS = 'ABCDEFGHIJKL';
+function startSplit(id) {
+  const p = byId(id);
+  if (mode) return;
+  mode = 'split';
+  split = { id, n: 2, equal: true, angle: bestAngle(p.geometry), reverse: false, names: [], areas: [], result: null };
+  renderSplit();
+  showView('split');
+  zoomTo(id);
+}
+function splitTargets() {
+  const p = byId(split.id);
+  if (split.equal) return Array(split.n).fill(p.area / split.n);
+  const t = [];
+  for (let i = 0; i < split.n - 1; i++) t.push(parseFloat(String(split.areas[i] ?? '').replace(',', '.')) || 0);
+  t.push(p.area - t.reduce((s, v) => s + v, 0));
+  return t;
+}
+function renderSplit() {
+  const p = byId(split.id);
+  const t = splitTargets();
+  for (let i = 0; i < split.n; i++) split.names[i] ||= `${p.name} ${LETTERS[i]}`;
+  $('#view-split').innerHTML = `
+    <button class="back" id="s-back" type="button">← Annuler le découpage</button>
+    <div class="dhead"><h2>Découper « ${esc(p.name)} »</h2>
+      <span class="note">Surface totale : <b class="num">${fmtHa(p.area)} ha</b></span></div>
+    <div class="row" style="justify-content:space-between">
+      <span class="lbl">Nombre de morceaux</span>
+      <span class="stepper"><button type="button" id="s-minus" aria-label="Moins">−</button><output id="s-n">${split.n}</output><button type="button" id="s-plus" aria-label="Plus">+</button></span>
+    </div>
+    <div class="seg" role="group">
+      <button type="button" id="s-eq" aria-pressed="${split.equal}">Parts égales</button>
+      <button type="button" id="s-custom" aria-pressed="${!split.equal}">Surfaces au choix</button>
+    </div>
+    <div class="pieces">
+      <div class="piece"><span></span><span class="lbl">Nom du morceau</span><span class="lbl">Surface (ha)</span></div>
+      ${t.map((v, i) => {
+        const last = i === split.n - 1;
+        const ro = split.equal || last;
+        return `<div class="piece"><span class="sw" style="background:${PIECE_COLORS[i]}"></span>
+          <input type="text" data-name="${i}" value="${esc(split.names[i])}" aria-label="Nom du morceau ${i + 1}">
+          <input type="text" inputmode="decimal" data-area="${i}" value="${ro ? fmtHa(Math.max(v, 0)) : esc(split.areas[i] ?? '')}" ${ro ? 'readonly' : ''} placeholder="0,00" aria-label="Surface du morceau ${i + 1}" class="num">
+        </div>`;
+      }).join('')}
+      ${!split.equal ? '<p class="note" style="margin:0">Le dernier morceau prend automatiquement le reste de la surface.</p>' : ''}
+    </div>
+    <div class="field">
+      <label for="s-angle">Sens des coupes : <span id="s-angle-v" class="num">${split.angle}°</span></label>
+      <input type="range" id="s-angle" min="0" max="179" step="1" value="${split.angle}">
+      <div class="row">
+        <button class="btn small" type="button" id="s-rot">Pivoter de 90°</button>
+        <button class="btn small" type="button" id="s-rev">Commencer par l'autre bout</button>
+      </div>
+    </div>
+    <p class="note" id="s-msg"></p>
+    <div class="row"><button class="btn" id="s-cancel" type="button">Annuler</button><button class="btn primary grow" id="s-ok" type="button">Valider le découpage</button></div>`;
+  $('#s-back').onclick = $('#s-cancel').onclick = () => { cancelSplit(); openDetail(split ? split.id : p.id); };
+  $('#s-minus').onclick = () => { if (split.n > 2) { split.n--; renderSplit(); } };
+  $('#s-plus').onclick = () => { if (split.n < 12) { split.n++; renderSplit(); } };
+  $('#s-eq').onclick = () => { split.equal = true; renderSplit(); };
+  $('#s-custom').onclick = () => {
+    split.equal = false;
+    if (!split.areas.length || split.areas.every(a => !a)) split.areas = Array(split.n - 1).fill(0).map(() => fmtHa(p.area / split.n));
+    renderSplit();
+  };
+  document.querySelectorAll('[data-name]').forEach(inp => inp.oninput = () => { split.names[+inp.dataset.name] = inp.value; });
+  document.querySelectorAll('[data-area]:not([readonly])').forEach(inp => inp.oninput = () => {
+    split.areas[+inp.dataset.area] = inp.value;
+    const tt = splitTargets(); const lastInp = document.querySelector(`[data-area="${split.n - 1}"]`);
+    lastInp.value = fmtHa(Math.max(tt[split.n - 1], 0));
+    schedulePreview();
+  });
+  const ang = $('#s-angle');
+  ang.oninput = () => { split.angle = +ang.value; $('#s-angle-v').textContent = split.angle + '°'; schedulePreview(); };
+  $('#s-rot').onclick = () => { split.angle = (split.angle + 90) % 180; ang.value = split.angle; $('#s-angle-v').textContent = split.angle + '°'; schedulePreview(); };
+  $('#s-rev').onclick = () => { split.reverse = !split.reverse; schedulePreview(); };
+  $('#s-ok').onclick = applySplit;
+  preview();
+}
+let prevT;
+function schedulePreview() { clearTimeout(prevT); prevT = setTimeout(preview, 60); }
+function preview() {
+  if (!split) return;
+  const p = byId(split.id);
+  const t = splitTargets();
+  const msg = $('#s-msg');
+  previewLayer.clearLayers(); split.result = null;
+  if (t.some(v => v <= 0.0001)) { msg.className = 'note err'; msg.textContent = 'Chaque morceau doit avoir une surface supérieure à 0 et la somme ne doit pas dépasser ' + fmtHa(p.area) + ' ha.'; $('#s-ok').disabled = true; return; }
+  let res = null;
+  try { res = computeSplit(p.geometry, t, split.angle, split.reverse); } catch (e) { console.warn(e); }
+  if (!res) { msg.className = 'note err'; msg.textContent = 'Découpage impossible avec ce sens de coupe. Essayez un autre angle.'; $('#s-ok').disabled = true; return; }
+  split.result = res;
+  res.forEach((r, i) => {
+    L.geoJSON(turf.feature(r.geometry), { style: { color: PIECE_COLORS[i], weight: 2.5, fillColor: PIECE_COLORS[i], fillOpacity: .35, dashArray: '6,4' }, pmIgnore: true })
+      .bindTooltip(`${esc(split.names[i] || LETTERS[i])}<br><small>${fmtHa(r.area)} ha</small>`, { permanent: true, direction: 'center', className: 'plabel' })
+      .addTo(previewLayer);
+  });
+  if (layers[split.id]) parcelLayer.removeLayer(layers[split.id]);
+  const maxErr = Math.max(...res.map((r, i) => Math.abs(r.area - t[i])));
+  msg.className = 'note';
+  msg.textContent = `Aperçu sur la carte. Précision : ±${(maxErr * 10000).toFixed(0)} m².`;
+  $('#s-ok').disabled = false;
+}
+function cancelSplit() { previewLayer.clearLayers(); mode = null; renderMap(); }
+function applySplit() {
+  if (!split || !split.result) return;
+  const p = byId(split.id);
+  const kids = split.result.map((r, i) => ({
+    id: uid(), name: (split.names[i] || `${p.name} ${LETTERS[i]}`).trim(), culture: p.culture, ilot: p.ilot, notes: '',
+    geometry: r.geometry, area: r.area, parentId: p.id, createdAt: today(),
+  }));
+  p.archived = true; p.splitDate = today();
+  db.parcels.push(...kids); save();
+  previewLayer.clearLayers(); mode = null; split = null;
+  selected = null; renderMap(); renderParcels(); showView('parcels');
+  map.fitBounds(L.geoJSON(turf.featureCollection(kids.map(k => turf.feature(k.geometry)))).getBounds(), { padding: [40, 40] });
+  toast(`${p.name} découpée en ${kids.length} parcelles`);
+}
+
+/* ============ Formulaire d'intervention ============ */
+function openEventForm(parcelIds, existing) {
+  const ps = active().sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true }));
+  if (!ps.length && !existing) { toast('Créez d\'abord une parcelle sur la carte.'); return; }
+  const ev = existing ? { ...existing } : { type: 'traitement', date: today() };
+  const sel = new Set(existing ? [existing.parcelId] : parcelIds);
+  const draw = () => {
+    const t = TYPES[ev.type];
+    const fieldHtml = t.fields.map(k => {
+      const d = F[k]; const v = ev[k] ?? '';
+      if (d.type === 'select') {
+        const opts = k === 'unite' ? t.units : d.opts;
+        return `<div class="field"><label for="ef-${k}">${d.label}</label><select id="ef-${k}" data-k="${k}">${opts.map(o => `<option ${o === v ? 'selected' : ''}>${esc(o)}</option>`).join('')}</select></div>`;
+      }
+      return `<div class="field"><label for="ef-${k}">${d.label}</label><input id="ef-${k}" data-k="${k}" type="${d.type}" ${d.step ? `step="${d.step}"` : ''} ${d.list ? `list="${d.list}"` : ''} ${d.ph ? `placeholder="${esc(d.ph)}"` : ''} value="${esc(v)}"></div>`;
+    }).join('');
+    openModal(`<h3>${existing ? 'Modifier l\'intervention' : 'Nouvelle intervention'}</h3>
+      <div class="typegrid" role="group" aria-label="Type">${Object.entries(TYPES).map(([k, x]) =>
+        `<button type="button" data-type="${k}" aria-pressed="${k === ev.type}"><i style="background:${x.color}"></i>${x.label}</button>`).join('')}</div>
+      <div class="field"><span class="lbl">Parcelle(s)</span>
+        ${existing ? `<b>${esc(byId(existing.parcelId)?.name)}</b>` : `<div class="checks">${ps.map(p =>
+          `<label><input type="checkbox" value="${p.id}" ${sel.has(p.id) ? 'checked' : ''}> ${esc(p.name)} <span class="note num">${fmtHa(p.area)} ha</span></label>`).join('')}</div>
+          <div class="row"><button class="btn small" type="button" id="ef-all">Tout cocher</button><button class="btn small" type="button" id="ef-none">Tout décocher</button></div>`}
+      </div>
+      <div class="grid2">
+        <div class="field"><label for="ef-date">Date</label><input id="ef-date" type="date" value="${esc(ev.date)}"></div>
+        <div class="field"><label for="ef-surface">Surface concernée (ha)</label><input id="ef-surface" type="number" step="any" value="${esc(ev.surface ?? '')}" placeholder="Toute la parcelle"></div>
+      </div>
+      <div class="grid2">${fieldHtml}</div>
+      <div class="field"><label for="ef-notes">Notes (météo, conditions, observations)</label><textarea id="ef-notes">${esc(ev.notes || '')}</textarea></div>
+      ${ev.type === 'semis' && !existing ? '<p class="note" style="margin:0">La culture semée devient la culture en place de la parcelle.</p>' : ''}
+      ${datalists()}
+      <div class="row" style="justify-content:flex-end"><button class="btn" id="ef-cancel" type="button">Annuler</button><button class="btn primary" id="ef-ok" type="button">Enregistrer</button></div>`);
+    const collect = () => {
+      document.querySelectorAll('#modal [data-k]').forEach(i => ev[i.dataset.k] = i.value.trim());
+      ev.date = $('#ef-date').value; ev.surface = $('#ef-surface').value; ev.notes = $('#ef-notes').value.trim();
+      document.querySelectorAll('#modal .checks input').forEach(c => c.checked ? sel.add(c.value) : sel.delete(c.value));
+    };
+    document.querySelectorAll('[data-type]').forEach(b => b.onclick = () => { collect(); ev.type = b.dataset.type; draw(); });
+    const all = $('#ef-all'); if (all) all.onclick = () => document.querySelectorAll('#modal .checks input').forEach(c => c.checked = true);
+    const none = $('#ef-none'); if (none) none.onclick = () => document.querySelectorAll('#modal .checks input').forEach(c => c.checked = false);
+    $('#ef-cancel').onclick = closeModal;
+    $('#ef-ok').onclick = () => {
+      collect();
+      if (!ev.date) { toast('Indiquez une date.'); return; }
+      const t2 = TYPES[ev.type];
+      const clean = { type: ev.type, date: ev.date, surface: ev.surface, notes: ev.notes };
+      t2.fields.forEach(k => clean[k] = ev[k] ?? '');
+      if (t2.fields.includes('unite') && !clean.unite) clean.unite = t2.units[0];
+      if (existing) {
+        Object.assign(db.interventions.find(x => x.id === existing.id), clean);
+      } else {
+        if (!sel.size) { toast('Cochez au moins une parcelle.'); return; }
+        sel.forEach(pid => {
+          db.interventions.push({ id: uid(), parcelId: pid, by: whoAmI(), ...clean });
+          if (ev.type === 'semis' && clean.culture) { const p = byId(pid); if (p) p.culture = clean.culture; }
+        });
+      }
+      save(); closeModal(); renderMap();
+      if (!$('#view-detail').hidden && selected) openDetail(selected);
+      else if (!$('#view-registre').hidden) renderRegistre();
+      else renderParcels();
+      toast(existing ? 'Intervention modifiée' : `Intervention enregistrée sur ${sel.size} parcelle(s)`);
+    };
+  };
+  draw();
+}
+
+/* ============ Registre ============ */
+const reg = { year: 'all', type: 'all', parcel: 'all' };
+function registreRows() {
+  return db.interventions.filter(e =>
+    (reg.year === 'all' || e.date.slice(0, 4) === reg.year) &&
+    (reg.type === 'all' || e.type === reg.type) &&
+    (reg.parcel === 'all' || e.parcelId === reg.parcel)
+  ).sort((a, b) => b.date.localeCompare(a.date));
+}
+function renderRegistre() {
+  const years = [...new Set(db.interventions.map(e => e.date.slice(0, 4)))].sort().reverse();
+  const rows = registreRows();
+  const opt = (v, l, cur) => `<option value="${esc(v)}" ${v === cur ? 'selected' : ''}>${esc(l)}</option>`;
+  $('#view-registre').innerHTML = `
+    <h2 style="font-size:24px">Registre des interventions</h2>
+    <div class="grid2">
+      <div class="field"><label for="r-year">Année</label><select id="r-year">${opt('all', 'Toutes', reg.year)}${years.map(y => opt(y, y, reg.year)).join('')}</select></div>
+      <div class="field"><label for="r-type">Type</label><select id="r-type">${opt('all', 'Tous', reg.type)}${Object.entries(TYPES).map(([k, t]) => opt(k, t.label, reg.type)).join('')}</select></div>
+    </div>
+    <div class="field"><label for="r-parcel">Parcelle</label><select id="r-parcel">${opt('all', 'Toutes', reg.parcel)}${db.parcels.slice().sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true })).map(p => opt(p.id, p.name + (p.archived ? ' (découpée)' : ''), reg.parcel)).join('')}</select></div>
+    <div class="row"><span class="note grow">${rows.length} intervention(s)</span>
+      <button class="btn small" id="r-csv" type="button">Exporter en CSV (Excel)</button>
+      <button class="btn small primary" id="r-add" type="button">＋ Intervention</button></div>
+    ${rows.length ? `<div class="tablewrap"><table>
+      <thead><tr><th>Date</th><th>Parcelle</th><th>Type</th><th>Détail</th><th>Surf.</th></tr></thead>
+      <tbody>${rows.map(e => { const p = byId(e.parcelId); const t = TYPES[e.type] || TYPES.autre;
+        return `<tr><td class="n">${fmtDate(e.date)}</td><td>${esc(p ? p.name : '?')}</td>
+        <td><span class="tag" style="background:${t.color}">${t.label}</span></td>
+        <td>${evSummary(e)}${e.notes ? '<br><span class="note">' + esc(e.notes) + '</span>' : ''}</td>
+        <td class="n">${fmtHa(e.surface ? +e.surface : (p ? p.area : 0))}</td></tr>`; }).join('')}</tbody></table></div>`
+      : '<div class="empty"><strong>Aucune intervention</strong><span>Sélectionnez une parcelle sur la carte puis « ＋ Intervention », ou utilisez le bouton ci-dessus pour enregistrer sur plusieurs parcelles d\'un coup.</span></div>'}`;
+  $('#r-year').onchange = e => { reg.year = e.target.value; renderRegistre(); };
+  $('#r-type').onchange = e => { reg.type = e.target.value; renderRegistre(); };
+  $('#r-parcel').onchange = e => { reg.parcel = e.target.value; renderRegistre(); };
+  $('#r-add').onclick = () => openEventForm([]);
+  $('#r-csv').onclick = exportCSV;
+}
+function download(name, content, type) {
+  const blob = new Blob([content], { type });
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+}
+function exportCSV() {
+  const cols = ['date', 'parcelle', 'surface_parcelle_ha', 'culture_parcelle', 'type', 'surface_ha', ...Object.keys(F), 'notes', 'saisi_par'];
+  const q = v => `"${String(v ?? '').replace(/"/g, '""')}"`;
+  const lines = [cols.join(';')];
+  registreRows().slice().reverse().forEach(e => {
+    const p = byId(e.parcelId) || {};
+    const row = { date: e.date, parcelle: p.name, surface_parcelle_ha: p.area ? fmtHa(p.area) : '', culture_parcelle: p.culture, type: (TYPES[e.type] || {}).label, surface_ha: e.surface || (p.area ? fmtHa(p.area) : ''), notes: e.notes };
+    Object.keys(F).forEach(k => row[k] = e[k]);
+    row.saisi_par = e.by;
+    lines.push(cols.map(c => q(row[c])).join(';'));
+  });
+  download(`registre-interventions-${today()}.csv`, '﻿' + lines.join('\r\n'), 'text/csv;charset=utf-8');
+}
+
+/* ============ Données : import / export ============ */
+function renderData() {
+  const arch = db.parcels.filter(p => p.archived);
+  $('#view-data').innerHTML = `
+    <h2 style="font-size:24px">Données</h2>
+    <div class="empty" style="border-style:solid">
+      <strong>Où sont mes données ?</strong>
+      ${CLOUD
+        ? `<span>Dans la base commune : tout ce que vous saisissez apparaît sur les appareils des autres personnes connectées. Sans réseau, la saisie continue et part dès le retour de la connexion.</span>
+           <span>Connecté en tant que <b>${esc(me && me.email)}</b>. <button class="linkbtn" type="button" id="x-logout">Se déconnecter</button></span>`
+        : `<span>Tout est enregistré dans ce navigateur, sur cet appareil. Faites une sauvegarde régulièrement, et pour passer sur un autre appareil exportez puis importez le fichier.</span>`}
+      <span>Une sauvegarde de temps en temps reste une bonne précaution.</span>
+      <div class="row"><button class="btn primary" id="x-save" type="button">Télécharger une sauvegarde</button>
+        <label class="btn" for="x-restore">Restaurer une sauvegarde</label><input type="file" id="x-restore" accept=".json" hidden></div>
+    </div>
+    <div class="empty" style="border-style:solid">
+      <strong>Importer des contours de parcelles</strong>
+      <span>Fichier PAC Telepac ou autre logiciel : shapefile zippé (.zip), KML (Google Earth) ou GeoJSON. Les parcelles importées s'ajoutent aux vôtres.</span>
+      <div class="row"><label class="btn" for="x-import">Choisir un fichier</label><input type="file" id="x-import" accept=".zip,.kml,.geojson,.json" hidden></div>
+    </div>
+    <div class="row"><button class="btn small" id="x-geo" type="button">Exporter les contours (GeoJSON)</button></div>
+    ${arch.length ? `<div><h3 style="font-size:18px">Parcelles découpées (archives)</h3>
+      <div class="plist">${arch.map(p => `<div class="pitem" style="cursor:default"><span class="sw" style="background:${cultureColor(p.culture)}"></span>
+        <span><span class="nm" style="display:block">${esc(p.name)}</span><span class="sub">découpée le ${fmtDate(p.splitDate)}</span></span><span class="ha">${fmtHa(p.area)} ha</span></div>`).join('')}</div></div>` : ''}
+    <div class="row" style="margin-top:auto"><button class="btn small danger" id="x-wipe" type="button">Tout effacer</button></div>`;
+  $('#x-save').onclick = () => download(`mon-parcellaire-sauvegarde-${today()}.json`, JSON.stringify(db), 'application/json');
+  $('#x-geo').onclick = () => download(`parcelles-${today()}.geojson`, JSON.stringify(turf.featureCollection(active().map(p =>
+    turf.feature(p.geometry, { nom: p.name, culture: p.culture, ilot: p.ilot, surface_ha: +p.area.toFixed(4) })))), 'application/geo+json');
+  $('#x-restore').onchange = async e => {
+    const f = e.target.files[0]; if (!f) return;
+    try {
+      const d = JSON.parse(await f.text());
+      if (!Array.isArray(d.parcels)) throw new Error();
+      confirmBox('Restaurer la sauvegarde', `Les données actuelles seront remplacées par celles du fichier (${d.parcels.length} parcelles, ${(d.interventions || []).length} interventions).`, 'Remplacer', () => {
+        db = d; db.interventions ||= []; save(); renderMap(); renderData(); fitAll(); toast('Sauvegarde restaurée');
+      });
+    } catch (err) { toast('Ce fichier n\'est pas une sauvegarde Mon Parcellaire.'); }
+  };
+  $('#x-import').onchange = async e => { const f = e.target.files[0]; if (f) await importFile(f); e.target.value = ''; };
+  const lo = $('#x-logout'); if (lo) lo.onclick = () => firebase.auth().signOut();
+  $('#x-wipe').onclick = () => confirmBox('Tout effacer', CLOUD
+    ? 'Toutes les parcelles et interventions de la base commune seront supprimées, pour tout le monde. Téléchargez une sauvegarde avant si besoin.'
+    : 'Toutes les parcelles et interventions de ce navigateur seront supprimées. Téléchargez une sauvegarde avant si besoin.', 'Tout effacer', () => {
+    db = { parcels: [], interventions: [] }; save(); selected = null; renderMap(); renderData(); toast('Données effacées');
+  });
+}
+function parseKML(text) {
+  const xml = new DOMParser().parseFromString(text, 'text/xml');
+  const feats = [];
+  xml.querySelectorAll('Placemark').forEach(pm => {
+    const name = pm.querySelector('name')?.textContent?.trim();
+    pm.querySelectorAll('Polygon').forEach(pg => {
+      const ring = el => el ? el.textContent.trim().split(/\s+/).map(s => s.split(',').slice(0, 2).map(Number)) : null;
+      const outer = ring(pg.querySelector('outerBoundaryIs coordinates'));
+      const inners = [...pg.querySelectorAll('innerBoundaryIs coordinates')].map(ring);
+      if (outer && outer.length > 3) feats.push(turf.polygon([outer, ...inners], { name }));
+    });
+  });
+  return turf.featureCollection(feats);
+}
+async function importFile(f) {
+  try {
+    let gj;
+    const ext = f.name.toLowerCase().split('.').pop();
+    if (ext === 'zip') { if (typeof shp === 'undefined') throw new Error('lib'); gj = await shp(await f.arrayBuffer()); if (Array.isArray(gj)) gj = turf.featureCollection(gj.flatMap(g => g.features)); }
+    else if (ext === 'kml') gj = parseKML(await f.text());
+    else gj = JSON.parse(await f.text());
+    const feats = (gj.type === 'FeatureCollection' ? gj.features : [gj]).filter(x => x && x.geometry && /Polygon/.test(x.geometry.type));
+    if (!feats.length) { toast('Aucun polygone trouvé dans ce fichier.'); return; }
+    const pick = (pr, keys) => { for (const k of keys) { const hit = Object.keys(pr || {}).find(x => x.toLowerCase() === k); if (hit && pr[hit] != null && pr[hit] !== '') return String(pr[hit]); } return ''; };
+    let n = active().length;
+    feats.forEach(ft => {
+      const pr = ft.properties || {};
+      const geom = ft.geometry;
+      n++;
+      const ilot = pick(pr, ['num_ilot', 'ilot', 'numilot', 'pacage_ilot']);
+      const num = pick(pr, ['num_parcel', 'numparcel', 'num_parcelle', 'parcelle']);
+      const name = pick(pr, ['nom', 'name', 'libelle', 'label']) || (ilot ? `Îlot ${ilot}${num ? '.' + num : ''}` : 'Parcelle ' + n);
+      db.parcels.push({ id: uid(), name, culture: pick(pr, ['culture', 'code_cultu', 'cult', 'code_culture']), ilot, notes: '', geometry: geom, area: areaHa(geom), createdAt: today() });
+    });
+    save(); renderMap(); renderParcels(); showView('parcels'); fitAll();
+    toast(`${feats.length} parcelle(s) importée(s)`);
+  } catch (err) {
+    console.warn(err);
+    toast(err.message === 'lib' ? 'Lecture des shapefiles indisponible (pas de connexion ?).' : 'Fichier illisible. Formats acceptés : .zip (shapefile), .kml, .geojson.');
+  }
+}
+function fitAll() { if (parcelLayer.getLayers().length) map.fitBounds(parcelLayer.getBounds(), { padding: [30, 30] }); }
+
+/* exemple : quelques champs fictifs près de Chartres */
+function loadDemo() {
+  const rect = (x, y, w, h, a = 0) => {
+    const c = [[x, y], [x + w, y], [x + w, y + h], [x, y + h], [x, y]];
+    return turf.transformRotate(turf.polygon([c]), a).geometry;
+  };
+  const ps = [
+    { name: 'Les Grands Champs', culture: 'Blé tendre', g: rect(1.452, 48.381, .009, .005, 8) },
+    { name: 'La Mare', culture: 'Colza', g: rect(1.463, 48.382, .006, .006, 8) },
+    { name: 'Le Chemin Vert', culture: 'Orge d\'hiver', g: rect(1.451, 48.3745, .011, .0045, 8) },
+  ];
+  ps.forEach(d => db.parcels.push({ id: uid(), name: d.name + ' (exemple)', culture: d.culture, notes: 'Parcelle d\'exemple, à supprimer.', geometry: d.g, area: areaHa(d.g), createdAt: today() }));
+  const [a, b] = db.parcels.slice(-3);
+  db.interventions.push(
+    { id: uid(), parcelId: a.id, type: 'semis', date: '2026-10-14', culture: 'Blé tendre', variete: 'Chevignon', dose: '160', unite: 'kg/ha', materiel: 'Semoir combiné' },
+    { id: uid(), parcelId: a.id, type: 'traitement', date: '2026-10-28', produit: 'Désherbant automne', dose: '0.6', unite: 'L/ha', cible: 'Ray-grass', bouillie: '120', notes: 'Vent faible, sol frais' },
+    { id: uid(), parcelId: b.id, type: 'engrais', date: '2026-09-02', produit: 'Ammonitrate 27', dose: '100', unite: 'kg/ha', unitesN: '27' },
+  );
+  save(); renderMap(); renderParcels(); fitAll(); toast('Exemple chargé');
+}
+
+/* ============ Position GPS ============ */
+let gpsMarker = null, gpsCircle = null, gpsFirst = true;
+const gpsBtn = $('#btn-gps');
+gpsBtn.onclick = () => {
+  const on = gpsBtn.getAttribute('aria-pressed') !== 'true';
+  gpsBtn.setAttribute('aria-pressed', on);
+  if (on) { gpsFirst = true; map.locate({ watch: true, enableHighAccuracy: true }); toast('Recherche de votre position…'); }
+  else { map.stopLocate(); gpsMarker && map.removeLayer(gpsMarker); gpsCircle && map.removeLayer(gpsCircle); gpsMarker = gpsCircle = null; }
+};
+map.on('locationfound', e => {
+  if (!gpsMarker) {
+    gpsCircle = L.circle(e.latlng, { radius: e.accuracy, color: '#1e88ff', weight: 1, fillOpacity: .12, interactive: false }).addTo(map);
+    gpsMarker = L.marker(e.latlng, { icon: L.divIcon({ className: '', html: '<div class="gps-dot"></div>', iconSize: [16, 16] }), interactive: false }).addTo(map);
+  } else { gpsMarker.setLatLng(e.latlng); gpsCircle.setLatLng(e.latlng).setRadius(e.accuracy); }
+  if (gpsFirst) { map.setView(e.latlng, Math.max(map.getZoom(), 16)); gpsFirst = false; }
+});
+map.on('locationerror', () => { gpsBtn.setAttribute('aria-pressed', 'false'); toast('Position indisponible : autorisez la localisation pour cette application.'); });
+
+/* agrandir la carte sur téléphone */
+$('#btn-bigmap').onclick = () => {
+  const on = document.body.classList.toggle('bigmap');
+  $('#btn-bigmap').setAttribute('aria-pressed', on);
+  setTimeout(() => map.invalidateSize(), 60);
+};
+window.addEventListener('resize', () => map.invalidateSize());
+
+/* ============ Démarrage ============ */
+load();
+renderMap();
+renderParcels();
+if (active().length && !localStorage.getItem(STORE + '-view')) fitAll();
+if (CLOUD) {
+  $('#view-parcels').innerHTML = '<p class="note">Chargement des parcelles…</p>';
+  startCloud();
+  setInterval(() => { if (pendingRefresh && !busy()) applyLatest(); }, 1000);
+}
+if ('serviceWorker' in navigator && location.protocol !== 'file:') navigator.serviceWorker.register('sw.js').catch(() => {});
+</script>
+</body>
+</html>
