@@ -92,6 +92,11 @@ h1, h2, h3 { font-family: var(--font-head); font-weight: 700; margin: 0; text-wr
 .pitem .nm { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pitem .sub { font-size: 13px; color: var(--muted); }
 .pitem .ha { font-variant-numeric: tabular-nums; font-weight: 600; }
+.plist.multi .pitem { grid-template-columns: 20px 1fr auto; }
+.pitem .ck { width: 20px; height: 20px; border: 2px solid var(--muted); border-radius: 4px; display: grid; place-items: center; font-size: 13px; font-weight: 700; line-height: 1; }
+.pitem.on { background: var(--surface-2); }
+.pitem.on .ck { background: var(--accent); border-color: var(--accent); color: var(--accent-fg); }
+.selbar { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; background: var(--surface-2); border-radius: 8px; border: 2px solid var(--wheat); }
 
 .empty { border: 1px dashed var(--line); border-radius: 8px; padding: 18px; color: var(--muted); display: flex; flex-direction: column; gap: 10px; }
 .empty strong { color: var(--fg); }
@@ -274,6 +279,7 @@ td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
 <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@2.17.0/dist/leaflet-geoman.min.js"></script>
 <script src="https://unpkg.com/@turf/turf@6.5.0/turf.min.js"></script>
 <script src="https://unpkg.com/shpjs@4.0.4/dist/shp.min.js"></script>
+<script src="https://unpkg.com/proj4@2.9.0/dist/proj4.js"></script>
 <script src="config.js"></script>
 <script>
   if (window.FIREBASE_CONFIG && window.FIREBASE_CONFIG.apiKey) {
@@ -342,7 +348,7 @@ function applyLatest() {
     synced[col] = m; latest[col] = null;
   }
   pendingRefresh = false;
-  if (changed) refreshUI();
+  if (changed) { fixProjectedParcels(); refreshUI(); }
 }
 function refreshUI() {
   if (busy()) { pendingRefresh = true; return; }
@@ -522,6 +528,7 @@ const previewLayer = L.featureGroup().addTo(map);
 const layers = {};
 let selected = null;
 let mode = null; // null | 'draw' | 'edit' | 'split'
+let multi = null; // sélection multiple : Set d'ids, ou null hors sélection
 
 function renderMap() {
   parcelLayer.clearLayers();
@@ -529,13 +536,15 @@ function renderMap() {
   for (const p of active()) {
     const col = cultureColor(p.culture);
     const isSel = p.id === selected;
+    const inMulti = multi && multi.has(p.id);
     const lyr = L.geoJSON(turf.feature(p.geometry), {
-      style: { color: isSel ? '#ffffff' : col, weight: isSel ? 3.5 : 2, fillColor: col, fillOpacity: isSel ? .38 : .22 },
+      style: inMulti ? { color: '#ffd84a', weight: 3.5, fillColor: '#ffd84a', fillOpacity: .45 }
+        : { color: isSel ? '#ffffff' : col, weight: isSel ? 3.5 : 2, fillColor: col, fillOpacity: isSel ? .38 : .22 },
       pmIgnore: true,
     });
-    lyr.bindTooltip(`${esc(p.name)}<br><small>${fmtHa(p.area)} ha${p.culture ? ' · ' + esc(p.culture) : ''}</small>`,
+    lyr.bindTooltip(`${inMulti ? '✓ ' : ''}${esc(p.name)}<br><small>${fmtHa(p.area)} ha${p.culture ? ' · ' + esc(p.culture) : ''}</small>`,
       { permanent: true, direction: 'center', className: 'plabel', interactive: false });
-    lyr.on('click', () => { if (!mode) openDetail(p.id); });
+    lyr.on('click', () => { if (mode) return; if (multi) toggleMulti(p.id); else openDetail(p.id); });
     lyr.addTo(parcelLayer);
     layers[p.id] = lyr;
   }
@@ -591,6 +600,7 @@ function showView(v) {
 }
 document.querySelectorAll('.tabs button').forEach(b => b.onclick = () => {
   if (mode === 'split') cancelSplit();
+  if (multi) { multi = null; renderMap(); }
   if (b.dataset.tab === 'parcels') { selected = null; renderMap(); renderParcels(); showView('parcels'); }
   if (b.dataset.tab === 'registre') { renderRegistre(); showView('registre'); }
   if (b.dataset.tab === 'data') { renderData(); showView('data'); }
@@ -606,21 +616,37 @@ function renderParcels() {
   const f = listFilter.toLowerCase();
   const shown = ps.filter(p => !f || (p.name + ' ' + (p.culture || '') + ' ' + (p.ilot || '')).toLowerCase().includes(f))
     .sort((a, b) => a.name.localeCompare(b.name, 'fr', { numeric: true }));
+  if (multi) for (const id of [...multi]) if (!ps.some(p => p.id === id)) multi.delete(id);
+  const selArea = multi ? ps.filter(p => multi.has(p.id)).reduce((s, p) => s + p.area, 0) : 0;
   $('#view-parcels').innerHTML = ps.length ? `
+    ${multi ? `
+    <div class="selbar">
+      <div class="row" style="justify-content:space-between">
+        <span><b class="num">${multi.size}</b> parcelle(s) sélectionnée(s) · <b class="num">${fmtHa(selArea)} ha</b></span>
+        <span class="row"><button class="btn small" id="m-all" type="button">Tout</button><button class="btn small" id="m-none" type="button">Aucune</button></span>
+      </div>
+      <span class="note">Touchez les parcelles dans la liste ou sur la carte.</span>
+      <div class="row">
+        <button class="btn primary" id="m-ev" type="button" ${multi.size ? '' : 'disabled'}>＋ Intervention</button>
+        <button class="btn danger" id="m-del" type="button" ${multi.size ? '' : 'disabled'}>Supprimer</button>
+        <button class="btn" id="m-done" type="button" style="margin-left:auto">Terminer</button>
+      </div>
+    </div>` : `
     <div class="summary">
       <div><b class="num">${ps.length}</b><span>parcelles</span></div>
       <div><b class="num">${fmtHa(total)}</b><span>hectares</span></div>
       <div><b class="num">${Object.keys(cultures).length}</b><span>cultures</span></div>
     </div>
     <div class="row">${Object.entries(cultures).sort((a, b) => b[1] - a[1]).map(([c, a]) =>
-      `<span class="chip"><i style="background:${cultureColor(c === 'Non renseignée' ? '' : c)}"></i>${esc(c)} <span class="num">${fmtHa(a)} ha</span></span>`).join('')}</div>
+      `<span class="chip"><i style="background:${cultureColor(c === 'Non renseignée' ? '' : c)}"></i>${esc(c)} <span class="num">${fmtHa(a)} ha</span></span>`).join('')}</div>`}
     <div class="row">
       <input class="inp grow" id="p-filter" type="search" placeholder="Filtrer (nom, culture, îlot)" value="${esc(listFilter)}">
-      <button class="btn primary" id="p-add-ev" type="button">＋ Intervention</button>
+      ${multi ? '' : `<button class="btn" id="p-multi" type="button">☑ Sélectionner</button>
+      <button class="btn primary" id="p-add-ev" type="button">＋ Intervention</button>`}
     </div>
-    <div class="plist">${shown.map(p => `
-      <button class="pitem" data-id="${p.id}" type="button">
-        <span class="sw" style="background:${cultureColor(p.culture)}"></span>
+    <div class="plist${multi ? ' multi' : ''}">${shown.map(p => `
+      <button class="pitem${multi && multi.has(p.id) ? ' on' : ''}" data-id="${p.id}" type="button" ${multi ? `aria-pressed="${multi.has(p.id)}"` : ''}>
+        ${multi ? `<span class="ck" aria-hidden="true">${multi.has(p.id) ? '✓' : ''}</span>` : `<span class="sw" style="background:${cultureColor(p.culture)}"></span>`}
         <span style="min-width:0"><span class="nm" style="display:block">${esc(p.name)}</span>
           <span class="sub">${esc(p.culture || 'Culture non renseignée')}${p.ilot ? ' · îlot ' + esc(p.ilot) : ''}</span></span>
         <span class="ha">${fmtHa(p.area)} ha</span>
@@ -635,10 +661,33 @@ function renderParcels() {
     </div>`;
   const pf = $('#p-filter');
   if (pf) pf.oninput = () => { listFilter = pf.value; const pos = pf.selectionStart; renderParcels(); const n = $('#p-filter'); n.focus(); n.setSelectionRange(pos, pos); };
-  document.querySelectorAll('.pitem').forEach(b => b.onclick = () => { openDetail(b.dataset.id); zoomTo(b.dataset.id); });
+  document.querySelectorAll('#view-parcels .pitem').forEach(b => b.onclick = () => {
+    if (multi) toggleMulti(b.dataset.id); else { openDetail(b.dataset.id); zoomTo(b.dataset.id); }
+  });
   const pa = $('#p-add-ev'); if (pa) pa.onclick = () => openEventForm([]);
+  const pm = $('#p-multi'); if (pm) pm.onclick = () => { multi = new Set(); selected = null; renderMap(); renderParcels(); };
+  if (multi) {
+    $('#m-all').onclick = () => { shown.forEach(p => multi.add(p.id)); renderMap(); renderParcels(); };
+    $('#m-none').onclick = () => { multi.clear(); renderMap(); renderParcels(); };
+    $('#m-done').onclick = () => { multi = null; renderMap(); renderParcels(); };
+    $('#m-ev').onclick = () => openEventForm([...multi]);
+    $('#m-del').onclick = () => {
+      const ids = new Set(multi);
+      const nEv = db.interventions.filter(e => ids.has(e.parcelId)).length;
+      confirmBox('Supprimer les parcelles', `${ids.size} parcelle(s) (${fmtHa(selArea)} ha) et leurs ${nEv} intervention(s) seront supprimées${CLOUD ? ', pour tout le monde' : ''}.`, 'Supprimer', () => {
+        db.parcels = db.parcels.filter(p => !ids.has(p.id));
+        db.interventions = db.interventions.filter(e => !ids.has(e.parcelId));
+        multi = new Set(); save(); renderMap(); renderParcels(); toast(`${ids.size} parcelle(s) supprimée(s)`);
+      });
+    };
+  }
   const ed = $('#e-draw'); if (ed) ed.onclick = startDraw;
   const dm = $('#e-demo'); if (dm) dm.onclick = loadDemo;
+}
+function toggleMulti(id) {
+  if (!multi) return;
+  multi.has(id) ? multi.delete(id) : multi.add(id);
+  renderMap(); renderParcels();
 }
 
 /* ============ Fiche parcelle ============ */
@@ -1092,8 +1141,8 @@ function renderData() {
     </div>
     <div class="empty" style="border-style:solid">
       <strong>Importer des contours de parcelles</strong>
-      <span>Fichier PAC Telepac ou autre logiciel : shapefile zippé (.zip), KML (Google Earth) ou GeoJSON. Les parcelles importées s'ajoutent aux vôtres.</span>
-      <div class="row"><label class="btn" for="x-import">Choisir un fichier</label><input type="file" id="x-import" accept=".zip,.kml,.geojson,.json" hidden></div>
+      <span>Dans Telepac, téléchargez le fichier <b>« parcelle »</b> (.zip) : il donne chaque parcelle avec sa culture. Le fichier « îlot » marche aussi, mais il ne contient pas la culture. Vous pouvez aussi choisir ensemble les fichiers .shp et .dbf dézippés, un KML (Google Earth) ou un GeoJSON. Les parcelles déjà importées ne sont pas ajoutées en double.</span>
+      <div class="row"><label class="btn" for="x-import">Choisir le fichier</label><input type="file" id="x-import" accept=".zip,.shp,.dbf,.shx,.prj,.cpg,.kml,.geojson,.json" multiple hidden></div>
     </div>
     <div class="row"><button class="btn small" id="x-geo" type="button">Exporter les contours (GeoJSON)</button></div>
     ${arch.length ? `<div><h3 style="font-size:18px">Parcelles découpées (archives)</h3>
@@ -1114,7 +1163,7 @@ function renderData() {
       });
     } catch (err) { toast('Ce fichier n\'est pas une sauvegarde Mon Parcellaire.'); }
   };
-  $('#x-import').onchange = async e => { const f = e.target.files[0]; if (f) await importFile(f); e.target.value = ''; };
+  $('#x-import').onchange = async e => { if (e.target.files.length) await importFile(e.target.files); e.target.value = ''; };
   const lo = $('#x-logout'); if (lo) lo.onclick = askLogout;
   $('#x-wipe').onclick = () => confirmBox('Tout effacer', CLOUD
     ? 'Toutes les parcelles et interventions de la base commune seront supprimées, pour tout le monde. Téléchargez une sauvegarde avant si besoin.'
@@ -1136,31 +1185,86 @@ function parseKML(text) {
   });
   return turf.featureCollection(feats);
 }
-async function importFile(f) {
+/* Telepac exporte en Lambert 93 (EPSG:2154) sans fichier .prj : on reprojette en GPS (WGS84) */
+const LAMBERT93 = '+proj=lcc +lat_0=46.5 +lon_0=3 +lat_1=49 +lat_2=44 +x_0=700000 +y_0=6600000 +ellps=GRS80 +towgs84=0,0,0,0,0,0,0 +units=m +no_defs';
+const isProjected = geom => { let big = false; turf.coordEach(turf.feature(geom), c => { if (Math.abs(c[0]) > 180 || Math.abs(c[1]) > 90) big = true; }); return big; };
+function toWGS84(geom) {
+  if (typeof proj4 === 'undefined') throw new Error('lib');
+  const g = JSON.parse(JSON.stringify(geom));
+  turf.coordEach(turf.feature(g), c => { const [x, y] = proj4(LAMBERT93, 'WGS84', [c[0], c[1]]); c[0] = x; c[1] = y; c.length = 2; });
+  return g;
+}
+// répare les parcelles importées avant cette correction (coordonnées restées en Lambert 93)
+function fixProjectedParcels() {
+  if (typeof proj4 === 'undefined') return;
+  let n = 0;
+  db.parcels.forEach(p => { if (p.geometry && isProjected(p.geometry)) { p.geometry = toWGS84(p.geometry); p.area = areaHa(p.geometry); n++; } });
+  if (n) { save(); renderMap(); toast(`${n} parcelle(s) PAC replacée(s) au bon endroit`); }
+}
+// codes cultures PAC les plus courants
+const PAC_CULTURES = {
+  BTH: 'Blé tendre d\'hiver', BTP: 'Blé tendre de printemps', BDH: 'Blé dur d\'hiver', BDP: 'Blé dur de printemps', EPE: 'Épeautre',
+  ORH: 'Orge d\'hiver', ORP: 'Orge de printemps', AVH: 'Avoine d\'hiver', AVP: 'Avoine de printemps', SGH: 'Seigle d\'hiver', TTH: 'Triticale d\'hiver', TTP: 'Triticale de printemps',
+  MIS: 'Maïs grain', MIE: 'Maïs ensilage', MID: 'Maïs doux', SOG: 'Sorgho', CZH: 'Colza d\'hiver', CZP: 'Colza de printemps', TRN: 'Tournesol', SOJ: 'Soja', LIH: 'Lin oléagineux d\'hiver', LIP: 'Lin oléagineux de printemps', LIF: 'Lin fibre', CHV: 'Chanvre',
+  PHI: 'Pois d\'hiver', PPR: 'Pois de printemps', FVL: 'Féverole', FEV: 'Féverole', LDH: 'Lentille', LUZ: 'Luzerne', TRE: 'Trèfle', MLG: 'Mélange de légumineuses', MPC: 'Mélange protéagineux-céréales',
+  BTN: 'Betterave sucrière', BVF: 'Betterave fourragère', PTC: 'Pomme de terre de consommation', PTF: 'Pomme de terre féculière', PPO: 'Pomme de terre (plants)', CHI: 'Chicorée', ENO: 'Endive', OIG: 'Oignon', CAR: 'Carotte', LEG: 'Légumes',
+  PPH: 'Prairie permanente', PRL: 'Prairie en rotation longue', PTR: 'Prairie temporaire', PTRE: 'Prairie temporaire', RGA: 'Ray-grass', FET: 'Fétuque', DAC: 'Dactyle', MLC: 'Mélange légumineuses-graminées',
+  J5M: 'Jachère', J6S: 'Jachère 6 ans et plus', J6P: 'Jachère 6 ans et plus', JNO: 'Jachère noire', JAC: 'Jachère', SNE: 'Surface non exploitée', BOR: 'Bordure de champ', BFS: 'Bande tampon', BTA: 'Bande tampon', MRS: 'Marais salant',
+  VRC: 'Vergers', VRG: 'Vergers', VRN: 'Vigne', CSE: 'Cultures sous serre', TCR: 'Taillis à courte rotation', MCR: 'Miscanthus', ZZZ: 'Non déclaré',
+};
+const pacLabel = code => { const c = String(code || '').trim().toUpperCase(); return c ? (PAC_CULTURES[c] || 'Code PAC ' + c) : ''; };
+async function readShapefiles(files) {
+  if (typeof shp === 'undefined') throw new Error('lib');
+  const byExt = {}; files.forEach(f => byExt[f.name.toLowerCase().split('.').pop()] = f);
+  if (byExt.zip) { const gj = await shp(await byExt.zip.arrayBuffer()); return Array.isArray(gj) ? turf.featureCollection(gj.flatMap(g => g.features)) : gj; }
+  if (!byExt.shp) throw new Error('shp');
+  // fichiers dézippés : .shp + .dbf (+ .prj)
+  const prj = byExt.prj ? await byExt.prj.text() : undefined;
+  const geoms = shp.parseShp(await byExt.shp.arrayBuffer(), prj);
+  const props = byExt.dbf ? shp.parseDbf(await byExt.dbf.arrayBuffer(), byExt.cpg ? await byExt.cpg.arrayBuffer() : undefined) : geoms.map(() => ({}));
+  return shp.combine([geoms, props]);
+}
+async function importFile(fileList) {
+  const files = [...fileList];
   try {
     let gj;
-    const ext = f.name.toLowerCase().split('.').pop();
-    if (ext === 'zip') { if (typeof shp === 'undefined') throw new Error('lib'); gj = await shp(await f.arrayBuffer()); if (Array.isArray(gj)) gj = turf.featureCollection(gj.flatMap(g => g.features)); }
-    else if (ext === 'kml') gj = parseKML(await f.text());
-    else gj = JSON.parse(await f.text());
+    const exts = files.map(f => f.name.toLowerCase().split('.').pop());
+    if (exts.some(e => ['zip', 'shp', 'dbf', 'shx', 'prj'].includes(e))) gj = await readShapefiles(files);
+    else if (exts[0] === 'kml') gj = parseKML(await files[0].text());
+    else gj = JSON.parse(await files[0].text());
     const feats = (gj.type === 'FeatureCollection' ? gj.features : [gj]).filter(x => x && x.geometry && /Polygon/.test(x.geometry.type));
     if (!feats.length) { toast('Aucun polygone trouvé dans ce fichier.'); return; }
-    const pick = (pr, keys) => { for (const k of keys) { const hit = Object.keys(pr || {}).find(x => x.toLowerCase() === k); if (hit && pr[hit] != null && pr[hit] !== '') return String(pr[hit]); } return ''; };
-    let n = active().length;
+    const pick = (pr, keys) => { for (const k of keys) { const hit = Object.keys(pr || {}).find(x => x.toLowerCase() === k); if (hit && pr[hit] != null && String(pr[hit]).trim() !== '') return String(pr[hit]).trim(); } return ''; };
+    const existing = new Set(active().map(p => p.pacKey).filter(Boolean));
+    let n = active().length, added = 0, skipped = 0;
     feats.forEach(ft => {
       const pr = ft.properties || {};
-      const geom = ft.geometry;
-      n++;
-      const ilot = pick(pr, ['num_ilot', 'ilot', 'numilot', 'pacage_ilot']);
-      const num = pick(pr, ['num_parcel', 'numparcel', 'num_parcelle', 'parcelle']);
-      const name = pick(pr, ['nom', 'name', 'libelle', 'label']) || (ilot ? `Îlot ${ilot}${num ? '.' + num : ''}` : 'Parcelle ' + n);
-      db.parcels.push({ id: uid(), name, culture: pick(pr, ['culture', 'code_cultu', 'cult', 'code_culture']), ilot, notes: '', geometry: geom, area: areaHa(geom), createdAt: today() });
+      let geom = ft.geometry;
+      if (isProjected(geom)) geom = toWGS84(geom);
+      // Telepac parcelles : NUMERO_I (îlot), NUMERO_P (parcelle), TYPE (code culture), SURF (ha) — îlots : NUMERO, SURF_TOT
+      const isParcelFile = 'NUMERO_P' in pr || 'numero_p' in pr;
+      const ilot = pick(pr, ['numero_i', 'num_ilot', 'ilot', 'numilot']) || (!isParcelFile ? pick(pr, ['numero']) : '');
+      const num = pick(pr, ['numero_p', 'num_parcel', 'numparcel', 'num_parcelle', 'parcelle']);
+      const code = pick(pr, ['type', 'code_cultu', 'code_culture']);
+      const culture = pick(pr, ['culture']) || pacLabel(code);
+      const campagne = pick(pr, ['campagne']);
+      const pacKey = ilot ? `${campagne}-${ilot}-${num || '0'}` : '';
+      if (pacKey && existing.has(pacKey)) { skipped++; return; }
+      n++; added++;
+      const name = pick(pr, ['nom', 'name', 'libelle', 'label'])
+        || (ilot ? (num ? `Îlot ${ilot} · P${num}` : `Îlot ${ilot}`) : 'Parcelle ' + n);
+      const surfPac = pick(pr, isParcelFile ? ['surf'] : ['surf_tot']);
+      const notes = [code ? `Code PAC ${code}` : '', surfPac ? `surface déclarée ${String(+surfPac).replace('.', ',')} ha` : '', campagne ? `PAC ${campagne}` : ''].filter(Boolean).join(' · ');
+      db.parcels.push({ id: uid(), name, culture, ilot, notes, pacKey, geometry: geom, area: areaHa(geom), createdAt: today() });
+      if (pacKey) existing.add(pacKey);
     });
-    save(); renderMap(); renderParcels(); showView('parcels'); fitAll();
-    toast(`${feats.length} parcelle(s) importée(s)`);
+    save(); selected = null; renderMap(); renderParcels(); showView('parcels'); fitAll();
+    toast(`${added} parcelle(s) importée(s)` + (skipped ? `, ${skipped} déjà présente(s) ignorée(s)` : ''));
   } catch (err) {
     console.warn(err);
-    toast(err.message === 'lib' ? 'Lecture des shapefiles indisponible (pas de connexion ?).' : 'Fichier illisible. Formats acceptés : .zip (shapefile), .kml, .geojson.');
+    toast(err.message === 'lib' ? 'Lecture des fichiers PAC indisponible (pas de connexion ?).'
+      : err.message === 'shp' ? 'Il manque le fichier .shp : sélectionnez ensemble le .shp et le .dbf, ou le fichier .zip.'
+      : 'Fichier illisible. Formats acceptés : .zip Telepac, .shp + .dbf, .kml, .geojson.');
   }
 }
 function fitAll() { if (parcelLayer.getLayers().length) map.fitBounds(parcelLayer.getBounds(), { padding: [30, 30] }); }
@@ -1224,6 +1328,7 @@ window.addEventListener('resize', () => map.invalidateSize());
 
 /* ============ Démarrage ============ */
 load();
+if (!CLOUD) fixProjectedParcels();
 renderMap();
 renderParcels();
 if (active().length && !localStorage.getItem(STORE + '-view')) fitAll();
